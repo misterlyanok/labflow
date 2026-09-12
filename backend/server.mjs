@@ -43,6 +43,8 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`)
     const path = url.pathname
 
+    if (req.method === 'GET' && path === '/health') return json(res, 200, { ok: true, service: 'labflow-api' })
+
     if (req.method === 'POST' && path === '/auth/login') {
       const { group, password } = await body(req)
       if (group !== '668204' || password !== 'hedge67') return json(res, 401, { code: 'INVALID_CREDENTIALS', message: 'Неверная группа или пароль.' })
