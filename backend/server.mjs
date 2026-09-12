@@ -47,7 +47,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && path === '/auth/login') {
       const { group, password } = await body(req)
-      if (group !== '668204' || password !== 'hedge67') return json(res, 401, { code: 'INVALID_CREDENTIALS', message: 'Неверная группа или пароль.' })
+      if (group !== '67' || password !== 'hedge67') return json(res, 401, { code: 'INVALID_CREDENTIALS', message: 'Неверная группа или пароль.' })
       const user = { id: randomUUID(), telegramId: null, name: '', group, notifications: true }
       users.set(user.id, user)
       const token = randomUUID()
