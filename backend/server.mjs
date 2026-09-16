@@ -2,6 +2,7 @@ import http from 'node:http'
 import { randomUUID } from 'node:crypto'
 
 const port = Number(process.env.PORT || 8787)
+const universityScheduleUrl = process.env.UNIVERSITY_SCHEDULE_URL || ''
 const users = new Map()
 const sessions = new Map()
 const queueEntries = new Map()
@@ -9,6 +10,31 @@ const queueEntries = new Map()
 const lessons = [
   { id: 'p3', subject: 'Программирование', title: 'Лабораторная №3', date: '2026-09-15', startTime: '14:30', endTime: '16:00', teacher: 'Иванов А.А.', room: '204', registrationStatus: 'open' }
 ]
+
+function normalizeLessons(payload) {
+  const source = Array.isArray(payload) ? payload : payload.lessons || payload.schedule || payload.data || []
+  return source.map((item, index) => ({
+    id: String(item.id || item.lessonId || item.universityId || `university-lesson-${index + 1}`),
+    subject: String(item.subject || item.subjectName || 'Лабораторная'),
+    subjectId: String(item.subjectId || item.subjectCode || (item.subject || item.subjectName || 'lab').toLowerCase().replace(/[^a-zа-я0-9]+/gi, '-')),
+    title: String(item.title || item.name || `Лабораторная №${index + 1}`),
+    date: String(item.date || item.day || item.dateLesson || item.startLessonDate || ''),
+    startTime: String(item.startTime || item.start || item.startLessonTime || item.timeFrom || ''),
+    endTime: String(item.endTime || item.end || item.endLessonTime || item.timeTo || ''),
+    teacher: item.teacher || item.instructor || (Array.isArray(item.employees) && item.employees[0] ? [item.employees[0].lastName, item.employees[0].firstName, item.employees[0].middleName].filter(Boolean).join(' ') : undefined),
+    room: item.room || item.classroom || (Array.isArray(item.auditories) ? item.auditories[0] : undefined),
+    registrationStatus: item.registrationStatus || item.registration || 'open',
+    registration: item.registration || item.registrationStatus || 'open'
+  })).filter(item => item.date && item.startTime)
+}
+
+async function getUniversitySchedule(groupNumber) {
+  if (!universityScheduleUrl) return lessons
+  const requestUrl = universityScheduleUrl.replaceAll('{groupNumber}', encodeURIComponent(groupNumber))
+  const response = await fetch(requestUrl, { headers: { Accept: 'application/json' } })
+  if (!response.ok) throw new Error(`University schedule returned ${response.status}`)
+  return normalizeLessons(await response.json())
+}
 
 function json(res, status, payload) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS' })
@@ -65,7 +91,7 @@ const server = http.createServer(async (req, res) => {
       if (typeof data.notifications === 'boolean') user.notifications = data.notifications
       return json(res, 200, { user })
     }
-    if (req.method === 'GET' && path === '/schedule') return json(res, 200, { lessons })
+    if (req.method === 'GET' && path === '/schedule') return json(res, 200, { lessons: await getUniversitySchedule(user.group) })
     if (req.method === 'GET' && path.startsWith('/lessons/')) {
       const lessonId = path.split('/')[2]
       const lesson = lessons.find(item => item.id === lessonId)

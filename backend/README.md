@@ -22,3 +22,9 @@ npm run server
 - `GET /me/history` — история.
 
 Сейчас данные хранятся в памяти процесса. После перезапуска сервера они сбрасываются. Следующий шаг — заменить коллекции в `server.mjs` на PostgreSQL/Prisma.
+
+## Университетское расписание
+
+Задай на backend переменную `UNIVERSITY_SCHEDULE_URL`. Для БГУИР используй `https://iis.bsuir.by/api/v1/schedule?studentGroup={groupNumber}`. При запросе `GET /schedule` сервер подставит группу текущего пользователя вместо `{groupNumber}`, выполнит HTTP GET с `Accept: application/json`, преобразует ответ и вернёт frontend единый формат. Поддерживаются ответы-массивы и объекты с полями `lessons`, `schedule` или `data`.
+
+Если переменная не задана, используется локальная mock-заглушка.
