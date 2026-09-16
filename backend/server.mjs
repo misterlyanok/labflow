@@ -12,7 +12,14 @@ const lessons = [
 ]
 
 function normalizeLessons(payload) {
-  const source = Array.isArray(payload) ? payload : payload.lessons || payload.schedule || payload.schedules || payload.data || (payload.subject || payload.subjectFullName ? [payload] : [])
+  const candidate = Array.isArray(payload) ? payload : payload?.lessons || payload?.schedule || payload?.schedules || payload?.data || payload?.items || payload
+  const source = Array.isArray(candidate)
+    ? candidate
+    : candidate && (candidate.subject || candidate.subjectFullName || candidate.startLessonTime)
+      ? [candidate]
+      : candidate && typeof candidate === 'object'
+        ? Object.values(candidate).flatMap(value => Array.isArray(value) ? value : [])
+        : []
   return source.map((item, index) => ({
     id: String(item.id || item.lessonId || item.universityId || `university-lesson-${index + 1}`),
     subject: String(item.subject || item.subjectName || 'Лабораторная'),
@@ -35,9 +42,21 @@ async function getUniversitySchedule(groupNumber) {
   }
   const requestUrl = universityScheduleUrl.replaceAll('{groupNumber}', encodeURIComponent(groupNumber))
   console.log(`Schedule request: ${requestUrl}`)
-  const response = await fetch(requestUrl, { headers: { Accept: 'application/json' } })
-  if (!response.ok) throw new Error(`University schedule returned ${response.status}`)
-  const normalized = normalizeLessons(await response.json())
+  let response
+  try {
+    response = await fetch(requestUrl, { headers: { Accept: 'application/json', 'User-Agent': 'LabFlow/1.0' } })
+  } catch (error) {
+    console.error('Schedule upstream network error:', error instanceof Error ? error.message : error)
+    throw new Error('University schedule network error')
+  }
+  if (!response.ok) {
+    const details = await response.text().catch(() => '')
+    console.error(`Schedule upstream HTTP ${response.status}:`, details.slice(0, 500))
+    throw new Error(`University schedule returned ${response.status}`)
+  }
+  const payload = await response.json()
+  const normalized = normalizeLessons(payload)
+  if (!normalized.length) console.warn('Schedule upstream returned no recognizable lessons')
   console.log(`Schedule response: ${normalized.length} lessons`)
   return normalized
 }
@@ -101,13 +120,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && path === '/schedule') return json(res, 200, { lessons: await getUniversitySchedule(user.group) })
     if (req.method === 'GET' && path.startsWith('/lessons/')) {
       const lessonId = path.split('/')[2]
-      const lesson = lessons.find(item => item.id === lessonId)
+      const lesson = (await getUniversitySchedule(user.group)).find(item => item.id === lessonId)
       return lesson ? json(res, 200, { lesson }) : json(res, 404, { message: 'Лабораторная не найдена.' })
     }
     if (req.method === 'GET' && path === '/me/queue') return json(res, 200, { queue: queueResponse(queueForUser(user.id)) })
     if (req.method === 'POST' && path.match(/^\/lessons\/[^/]+\/queue\/join$/)) {
       const lessonId = path.split('/')[2]
-      const lesson = lessons.find(item => item.id === lessonId)
+      const lesson = (await getUniversitySchedule(user.group)).find(item => item.id === lessonId)
       if (!lesson || lesson.registrationStatus !== 'open') return json(res, 409, { message: 'Регистрация закрыта.' })
       if (queueForUser(user.id)) return json(res, 409, { message: 'Вы уже в очереди.' })
       const existing = [...queueEntries.values()].filter(item => item.lessonId === lessonId)
