@@ -12,7 +12,7 @@ const lessons = [
 ]
 
 function normalizeLessons(payload) {
-  const source = Array.isArray(payload) ? payload : payload.lessons || payload.schedule || payload.data || []
+  const source = Array.isArray(payload) ? payload : payload.lessons || payload.schedule || payload.data || (payload.subject || payload.subjectFullName ? [payload] : [])
   return source.map((item, index) => ({
     id: String(item.id || item.lessonId || item.universityId || `university-lesson-${index + 1}`),
     subject: String(item.subject || item.subjectName || 'Лабораторная'),
@@ -64,6 +64,7 @@ function queueResponse(entry) {
 }
 
 const server = http.createServer(async (req, res) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`)
   if (req.method === 'OPTIONS') return json(res, 204, {})
   try {
     const url = new URL(req.url, `http://${req.headers.host}`)
