@@ -1,5 +1,6 @@
 import type { Lesson, Queue, Subject, User } from './types'
 const remoteBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+export const usingRemoteApi = Boolean(remoteBase)
 const remoteToken = () => localStorage.getItem('labflow_token') || ''
 async function remote<T>(path:string, options:RequestInit = {}):Promise<T>{
  const response = await fetch(`${remoteBase}${path}`, { ...options, headers:{'Content-Type':'application/json', ...(remoteToken()?{Authorization:`Bearer ${remoteToken()}`}:{}) , ...(options.headers||{})} })

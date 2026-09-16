@@ -12,7 +12,7 @@ const lessons = [
 ]
 
 function normalizeLessons(payload) {
-  const source = Array.isArray(payload) ? payload : payload.lessons || payload.schedule || payload.data || (payload.subject || payload.subjectFullName ? [payload] : [])
+  const source = Array.isArray(payload) ? payload : payload.lessons || payload.schedule || payload.schedules || payload.data || (payload.subject || payload.subjectFullName ? [payload] : [])
   return source.map((item, index) => ({
     id: String(item.id || item.lessonId || item.universityId || `university-lesson-${index + 1}`),
     subject: String(item.subject || item.subjectName || 'Лабораторная'),
@@ -29,11 +29,17 @@ function normalizeLessons(payload) {
 }
 
 async function getUniversitySchedule(groupNumber) {
-  if (!universityScheduleUrl) return lessons
+  if (!universityScheduleUrl) {
+    console.log('Schedule source: local mock')
+    return lessons
+  }
   const requestUrl = universityScheduleUrl.replaceAll('{groupNumber}', encodeURIComponent(groupNumber))
+  console.log(`Schedule request: ${requestUrl}`)
   const response = await fetch(requestUrl, { headers: { Accept: 'application/json' } })
   if (!response.ok) throw new Error(`University schedule returned ${response.status}`)
-  return normalizeLessons(await response.json())
+  const normalized = normalizeLessons(await response.json())
+  console.log(`Schedule response: ${normalized.length} lessons`)
+  return normalized
 }
 
 function json(res, status, payload) {
@@ -74,7 +80,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && path === '/auth/login') {
       const { group, password } = await body(req)
-      if (group !== '67' || password !== 'hedge67') return json(res, 401, { code: 'INVALID_CREDENTIALS', message: 'Неверная группа или пароль.' })
+      if (group !== '668204' || password !== 'hedge67') return json(res, 401, { code: 'INVALID_CREDENTIALS', message: 'Неверная группа или пароль.' })
       const user = { id: randomUUID(), telegramId: null, name: '', group, notifications: true }
       users.set(user.id, user)
       const token = randomUUID()
