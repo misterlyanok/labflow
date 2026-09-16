@@ -30,6 +30,8 @@ function normalizeLessons(payload) {
     endTime: String(item.endTime || item.end || item.endLessonTime || item.timeTo || ''),
     teacher: item.teacher || item.instructor || (Array.isArray(item.employees) && item.employees[0] ? [item.employees[0].lastName, item.employees[0].firstName, item.employees[0].middleName].filter(Boolean).join(' ') : undefined),
     room: item.room || item.classroom || (Array.isArray(item.auditories) ? item.auditories[0] : undefined),
+    note: item.note || undefined,
+    lessonTypeAbbrev: item.lessonTypeAbbrev || undefined,
     registrationStatus: item.registrationStatus || item.registration || 'open',
     registration: item.registration || item.registrationStatus || 'open'
   })).filter(item => item.date && item.startTime)
