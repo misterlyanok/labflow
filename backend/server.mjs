@@ -50,19 +50,20 @@ const lessons = [
 
 function normalizeLessons(payload) {
   const candidate = Array.isArray(payload) ? payload : payload?.lessons || payload?.schedule || payload?.schedules || payload?.data || payload?.items || payload
+  const isDate = value => typeof value === 'string' && (/^\d{4}-\d{2}-\d{2}/.test(value) || /^\d{2}\.\d{2}\.\d{4}$/.test(value))
   const source = Array.isArray(candidate)
-    ? candidate
+    ? candidate.map(item => ({ item }))
     : candidate && (candidate.subject || candidate.subjectFullName || candidate.startLessonTime)
-      ? [candidate]
+      ? [{ item: candidate }]
       : candidate && typeof candidate === 'object'
-        ? Object.values(candidate).flatMap(value => Array.isArray(value) ? value : [])
+        ? Object.entries(candidate).flatMap(([key, value]) => Array.isArray(value) ? value.map(item => ({ item, outerDate: isDate(key) ? key : '' })) : [])
         : []
-  return source.map((item, index) => ({
+  return source.map(({ item, outerDate }, index) => ({
     id: String(item.id || item.lessonId || item.universityId || `university-lesson-${index + 1}`),
-    subject: String(item.subject || item.subjectName || 'Лабораторная'),
+    subject: String(item.subject || item.subjectName || item.subjectFullName || 'Занятие'),
     subjectId: String(item.subjectId || item.subjectCode || (item.subject || item.subjectName || 'lab').toLowerCase().replace(/[^a-zа-я0-9]+/gi, '-')),
-    title: String(item.title || item.name || `Лабораторная №${index + 1}`),
-    date: String(item.date || item.day || item.dateLesson || item.startLessonDate || ''),
+    title: String(item.title || item.name || item.subjectFullName || item.subject || `Занятие №${index + 1}`),
+    date: String(item.date || (isDate(item.dateLesson) ? item.dateLesson : '') || outerDate || (isDate(item.startLessonDate) && item.startLessonDate === item.endLessonDate ? item.startLessonDate : '')),
     startTime: String(item.startTime || item.start || item.startLessonTime || item.timeFrom || ''),
     endTime: String(item.endTime || item.end || item.endLessonTime || item.timeTo || ''),
     teacher: item.teacher || item.instructor || (Array.isArray(item.employees) && item.employees[0] ? [item.employees[0].lastName, item.employees[0].firstName, item.employees[0].middleName].filter(Boolean).join(' ') : undefined),
