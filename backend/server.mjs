@@ -63,7 +63,7 @@ function normalizeLessons(payload) {
     subject: String(item.subject || item.subjectName || item.subjectFullName || 'Занятие'),
     subjectId: String(item.subjectId || item.subjectCode || (item.subject || item.subjectName || 'lab').toLowerCase().replace(/[^a-zа-я0-9]+/gi, '-')),
     title: String(item.title || item.name || item.subjectFullName || item.subject || `Занятие №${index + 1}`),
-    date: String(item.date || (isDate(item.dateLesson) ? item.dateLesson : '') || outerDate || (isDate(item.startLessonDate) && item.startLessonDate === item.endLessonDate ? item.startLessonDate : '')),
+    date: String(item.date || (isDate(item.dateLesson) ? item.dateLesson : '') || outerDate || (isDate(item.startLessonDate) ? item.startLessonDate : 'Дата не указана')),
     startTime: String(item.startTime || item.start || item.startLessonTime || item.timeFrom || ''),
     endTime: String(item.endTime || item.end || item.endLessonTime || item.timeTo || ''),
     teacher: item.teacher || item.instructor || (Array.isArray(item.employees) && item.employees[0] ? [item.employees[0].lastName, item.employees[0].firstName, item.employees[0].middleName].filter(Boolean).join(' ') : undefined),
@@ -75,6 +75,39 @@ function normalizeLessons(payload) {
   })).filter(item => item.date && item.startTime)
 }
 
+const weekdayNames = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
+const xmlValue = (block, tag) => block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i'))?.[1]?.trim() || ''
+const xmlValues = (block, tag) => [...block.matchAll(new RegExp(`<${tag}>([^<]*)</${tag}>`, 'gi'))].map(match => match[1].trim()).filter(Boolean)
+const parseDate = value => { const match = String(value || '').match(/^(\d{2})\.(\d{2})\.(\d{4})$/); return match ? new Date(`${match[3]}-${match[2]}-${match[1]}T00:00:00`) : null }
+const isoDate = date => date.toISOString().slice(0, 10)
+
+function expandXmlSchedule(xml) {
+  const schedules = xml.match(/<schedules>([\s\S]*?)<\/schedules>/i)?.[1] || ''
+  const result = []
+  const dayPattern = new RegExp(`<(${weekdayNames.slice(1).join('|')})>([\\s\\S]*?)</\\1>`, 'gi')
+  for (const dayMatch of schedules.matchAll(dayPattern)) {
+    const weekday = weekdayNames.indexOf(dayMatch[1].toLowerCase())
+    const block = dayMatch[2]
+    const start = parseDate(xmlValue(block, 'startLessonDate'))
+    const end = parseDate(xmlValue(block, 'endLessonDate'))
+    const subject = xmlValue(block, 'subject')
+    const subjectFullName = xmlValue(block, 'subjectFullName')
+    const weekNumbers = xmlValues(block, 'weekNumber').map(Number).filter(Boolean)
+    const dateLesson = parseDate(xmlValue(block, 'dateLesson'))
+    const base = { subject, subjectFullName, title: subjectFullName || subject, startLessonTime: xmlValue(block, 'startLessonTime'), endLessonTime: xmlValue(block, 'endLessonTime'), lessonTypeAbbrev: xmlValue(block, 'lessonTypeAbbrev'), note: xmlValue(block, 'note'), room: xmlValues(block, 'auditories')[0] || '' }
+    const addLesson = date => result.push({ ...base, date: isoDate(date), id: `${subject}-${isoDate(date)}-${base.startLessonTime}` })
+    if (dateLesson) addLesson(dateLesson)
+    else if (start && end && weekNumbers.length) {
+      for (const date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
+        if (date.getDay() !== weekday) continue
+        const week = Math.floor((date - start) / 86400000 / 7) % 4 + 1
+        if (weekNumbers.includes(week)) addLesson(new Date(date))
+      }
+    }
+  }
+  return result
+}
+
 async function getUniversitySchedule(groupNumber) {
   if (!universityScheduleUrl) {
     console.log('Schedule source: local mock')
@@ -84,7 +117,7 @@ async function getUniversitySchedule(groupNumber) {
   console.log(`Schedule request: ${requestUrl}`)
   let response
   try {
-    response = await fetch(requestUrl, { headers: { Accept: 'application/json', 'User-Agent': 'LabFlow/1.0' } })
+    response = await fetch(requestUrl, { headers: { Accept: 'application/json, application/xml, text/xml', 'User-Agent': 'LabFlow/1.0' } })
   } catch (error) {
     console.error('Schedule upstream network error:', error instanceof Error ? error.message : error)
     throw new Error('University schedule network error')
@@ -94,7 +127,9 @@ async function getUniversitySchedule(groupNumber) {
     console.error(`Schedule upstream HTTP ${response.status}:`, details.slice(0, 500))
     throw new Error(`University schedule returned ${response.status}`)
   }
-  const payload = await response.json()
+  const raw = await response.text()
+  let payload
+  try { payload = JSON.parse(raw) } catch { payload = expandXmlSchedule(raw) }
   const normalized = normalizeLessons(payload)
   if (!normalized.length) console.warn('Schedule upstream returned no recognizable lessons')
   console.log(`Schedule response: ${normalized.length} lessons`)
