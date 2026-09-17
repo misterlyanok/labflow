@@ -78,8 +78,40 @@ function normalizeLessons(payload) {
 const weekdayNames = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
 const xmlValue = (block, tag) => block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i'))?.[1]?.trim() || ''
 const xmlValues = (block, tag) => [...block.matchAll(new RegExp(`<${tag}>([^<]*)</${tag}>`, 'gi'))].map(match => match[1].trim()).filter(Boolean)
-const parseDate = value => { const match = String(value || '').match(/^(\d{2})\.(\d{2})\.(\d{4})$/); return match ? new Date(`${match[3]}-${match[2]}-${match[1]}T00:00:00`) : null }
+const parseDate = value => { const text = String(value || ''); const ru = text.match(/^(\d{2})\.(\d{2})\.(\d{4})$/); const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/); return ru ? new Date(`${ru[3]}-${ru[2]}-${ru[1]}T00:00:00`) : iso ? new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00`) : null }
 const isoDate = date => date.toISOString().slice(0, 10)
+
+function expandWeeklyEntries(entries, weekday, termStart) {
+  if (!Array.isArray(entries)) return []
+  const result = []
+  entries.forEach((item, index) => {
+    const start = parseDate(item.startLessonDate)
+    const end = parseDate(item.endLessonDate)
+    const oneOffDate = parseDate(item.dateLesson)
+    const weeks = (Array.isArray(item.weekNumber) ? item.weekNumber : []).map(Number).filter(Boolean)
+    const add = date => result.push({ ...item, id: `${item.id || item.lessonId || item.subject || 'lesson'}-${isoDate(date)}-${item.startLessonTime || item.startTime || ''}-${index}`, date: isoDate(date) })
+    if (oneOffDate) return add(oneOffDate)
+    if (!start || !end || !weeks.length) return
+    const cycleStart = termStart || start
+    for (const date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
+      if (date.getDay() !== weekday) continue
+      const week = Math.floor((date - cycleStart) / 86400000 / 7) % 4 + 1
+      if (weeks.includes(week)) add(new Date(date))
+    }
+  })
+  return result
+}
+
+function expandJsonSchedule(payload) {
+  const schedules = payload?.schedules
+  if (!schedules || Array.isArray(schedules) || typeof schedules !== 'object') return payload
+  const termStart = parseDate(payload.startDate)
+  const entries = Object.entries(schedules).flatMap(([dayName, lessonsForDay]) => {
+    const weekday = weekdayNames.indexOf(dayName.toLowerCase())
+    return weekday > 0 ? expandWeeklyEntries(lessonsForDay, weekday, termStart) : []
+  })
+  return entries.length ? entries : payload
+}
 
 function expandXmlSchedule(xml) {
   const schedules = xml.match(/<schedules>([\s\S]*?)<\/schedules>/i)?.[1] || ''
@@ -131,7 +163,7 @@ async function getUniversitySchedule(groupNumber) {
   }
   const raw = await response.text()
   let payload
-  try { payload = JSON.parse(raw) } catch { payload = expandXmlSchedule(raw) }
+  try { payload = expandJsonSchedule(JSON.parse(raw)) } catch { payload = expandXmlSchedule(raw) }
   const normalized = normalizeLessons(payload)
   if (!normalized.length) console.warn('Schedule upstream returned no recognizable lessons')
   console.log(`Schedule response: ${normalized.length} lessons`)
