@@ -83,6 +83,7 @@ const isoDate = date => date.toISOString().slice(0, 10)
 
 function expandXmlSchedule(xml) {
   const schedules = xml.match(/<schedules>([\s\S]*?)<\/schedules>/i)?.[1] || ''
+  const termStart = parseDate(xmlValue(xml, 'startDate'))
   const result = []
   const dayPattern = new RegExp(`<(${weekdayNames.slice(1).join('|')})>([\\s\\S]*?)</\\1>`, 'gi')
   for (const dayMatch of schedules.matchAll(dayPattern)) {
@@ -100,7 +101,8 @@ function expandXmlSchedule(xml) {
     else if (start && end && weekNumbers.length) {
       for (const date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
         if (date.getDay() !== weekday) continue
-        const week = Math.floor((date - start) / 86400000 / 7) % 4 + 1
+        const cycleStart = termStart || start
+        const week = Math.floor((date - cycleStart) / 86400000 / 7) % 4 + 1
         if (weekNumbers.includes(week)) addLesson(new Date(date))
       }
     }
