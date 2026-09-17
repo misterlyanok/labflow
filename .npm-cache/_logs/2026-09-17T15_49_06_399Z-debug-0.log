@@ -1,0 +1,247 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.19.0
+2 info using node@v24.21.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\rocky\Documents\Codex\2026-09-12\labflow-spec-md-ux-first-1\.npmrc
+5 silly config load:file:C:\Users\rocky\.npmrc
+6 silly config load:file:C:\Users\rocky\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm install pg
+8 verbose argv "install" "pg" "--save"
+9 verbose logfile logs-max:10 dir:C:\Users\rocky\Documents\Codex\2026-09-12\labflow-spec-md-ux-first-1\.npm-cache\_logs\2026-09-17T15_49_06_399Z-
+10 verbose logfile C:\Users\rocky\Documents\Codex\2026-09-12\labflow-spec-md-ux-first-1\.npm-cache\_logs\2026-09-17T15_49_06_399Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:2348810240 maxSize:587202560 maxEntrySize:293601280
+13 silly idealTree buildDeps
+14 silly fetch manifest pg@*
+15 silly packumentCache full:https://registry.npmjs.org/pg cache-miss
+16 http fetch GET 200 https://registry.npmjs.org/pg 798ms (cache miss)
+17 silly packumentCache full:https://registry.npmjs.org/pg set size:undefined disposed:false
+18 silly fetch manifest pg-native@>=3.0.1
+19 silly packumentCache full:https://registry.npmjs.org/pg-native cache-miss
+20 http fetch GET 200 https://registry.npmjs.org/pg-native 183ms (cache miss)
+21 silly packumentCache full:https://registry.npmjs.org/pg-native set size:undefined disposed:false
+22 silly placeDep ROOT pg@8.23.0 OK for: labflow-mvp@0.1.0 want: *
+23 silly fetch manifest pgpass@1.0.5
+24 silly packumentCache full:https://registry.npmjs.org/pgpass cache-miss
+25 silly fetch manifest pg-pool@^3.14.0
+26 silly packumentCache full:https://registry.npmjs.org/pg-pool cache-miss
+27 silly fetch manifest pg-types@2.2.0
+28 silly packumentCache full:https://registry.npmjs.org/pg-types cache-miss
+29 silly fetch manifest pg-protocol@^1.16.0
+30 silly packumentCache full:https://registry.npmjs.org/pg-protocol cache-miss
+31 silly fetch manifest pg-connection-string@^2.14.0
+32 silly packumentCache full:https://registry.npmjs.org/pg-connection-string cache-miss
+33 silly fetch manifest pg-cloudflare@^1.4.0
+34 silly packumentCache full:https://registry.npmjs.org/pg-cloudflare cache-miss
+35 http fetch GET 200 https://registry.npmjs.org/pgpass 119ms (cache miss)
+36 silly packumentCache full:https://registry.npmjs.org/pgpass set size:undefined disposed:false
+37 http fetch GET 200 https://registry.npmjs.org/pg-cloudflare 362ms (cache miss)
+38 silly packumentCache full:https://registry.npmjs.org/pg-cloudflare set size:undefined disposed:false
+39 http fetch GET 200 https://registry.npmjs.org/pg-types 471ms (cache miss)
+40 silly packumentCache full:https://registry.npmjs.org/pg-types set size:undefined disposed:false
+41 http fetch GET 200 https://registry.npmjs.org/pg-protocol 491ms (cache miss)
+42 silly packumentCache full:https://registry.npmjs.org/pg-protocol set size:undefined disposed:false
+43 http fetch GET 200 https://registry.npmjs.org/pg-pool 740ms (cache miss)
+44 silly packumentCache full:https://registry.npmjs.org/pg-pool set size:undefined disposed:false
+45 http fetch GET 200 https://registry.npmjs.org/pg-connection-string 794ms (cache miss)
+46 silly packumentCache full:https://registry.npmjs.org/pg-connection-string set size:undefined disposed:false
+47 silly fetch manifest pg@>=8.0
+48 silly packumentCache full:https://registry.npmjs.org/pg cache-miss
+49 http cache https://registry.npmjs.org/pg 14ms (cache hit)
+50 silly packumentCache full:https://registry.npmjs.org/pg set size:482398 disposed:false
+51 silly placeDep ROOT pg-cloudflare@1.4.0 OK for: pg@8.23.0 want: ^1.4.0
+52 silly placeDep ROOT pg-connection-string@2.14.0 OK for: pg@8.23.0 want: ^2.14.0
+53 silly placeDep ROOT pg-pool@3.14.0 OK for: pg@8.23.0 want: ^3.14.0
+54 silly placeDep ROOT pg-protocol@1.16.0 OK for: pg@8.23.0 want: ^1.16.0
+55 silly placeDep ROOT pg-types@2.2.0 OK for: pg@8.23.0 want: 2.2.0
+56 silly placeDep ROOT pgpass@1.0.5 OK for: pg@8.23.0 want: 1.0.5
+57 silly fetch manifest pg-int8@1.0.1
+58 silly packumentCache full:https://registry.npmjs.org/pg-int8 cache-miss
+59 silly fetch manifest postgres-date@~1.0.4
+60 silly packumentCache full:https://registry.npmjs.org/postgres-date cache-miss
+61 silly fetch manifest postgres-array@~2.0.0
+62 silly packumentCache full:https://registry.npmjs.org/postgres-array cache-miss
+63 silly fetch manifest postgres-bytea@~1.0.0
+64 silly packumentCache full:https://registry.npmjs.org/postgres-bytea cache-miss
+65 silly fetch manifest postgres-interval@^1.1.0
+66 silly packumentCache full:https://registry.npmjs.org/postgres-interval cache-miss
+67 silly fetch manifest split2@^4.1.0
+68 silly packumentCache full:https://registry.npmjs.org/split2 cache-miss
+69 http fetch GET 200 https://registry.npmjs.org/postgres-bytea 106ms (cache miss)
+70 silly packumentCache full:https://registry.npmjs.org/postgres-bytea set size:undefined disposed:false
+71 http fetch GET 200 https://registry.npmjs.org/postgres-date 126ms (cache miss)
+72 silly packumentCache full:https://registry.npmjs.org/postgres-date set size:undefined disposed:false
+73 http fetch GET 200 https://registry.npmjs.org/postgres-interval 127ms (cache miss)
+74 silly packumentCache full:https://registry.npmjs.org/postgres-interval set size:undefined disposed:false
+75 http fetch GET 200 https://registry.npmjs.org/pg-int8 134ms (cache miss)
+76 silly packumentCache full:https://registry.npmjs.org/pg-int8 set size:undefined disposed:false
+77 http fetch GET 200 https://registry.npmjs.org/split2 140ms (cache miss)
+78 silly packumentCache full:https://registry.npmjs.org/split2 set size:undefined disposed:false
+79 http fetch GET 200 https://registry.npmjs.org/postgres-array 179ms (cache miss)
+80 silly packumentCache full:https://registry.npmjs.org/postgres-array set size:undefined disposed:false
+81 silly placeDep ROOT pg-int8@1.0.1 OK for: pg-types@2.2.0 want: 1.0.1
+82 silly placeDep ROOT postgres-array@2.0.0 OK for: pg-types@2.2.0 want: ~2.0.0
+83 silly placeDep ROOT postgres-bytea@1.0.1 OK for: pg-types@2.2.0 want: ~1.0.0
+84 silly placeDep ROOT postgres-date@1.0.7 OK for: pg-types@2.2.0 want: ~1.0.4
+85 silly placeDep ROOT postgres-interval@1.2.0 OK for: pg-types@2.2.0 want: ^1.1.0
+86 silly fetch manifest xtend@^4.0.0
+87 silly packumentCache full:https://registry.npmjs.org/xtend cache-miss
+88 http fetch GET 200 https://registry.npmjs.org/npm 2172ms
+89 http fetch GET 200 https://registry.npmjs.org/xtend 128ms (cache miss)
+90 silly packumentCache full:https://registry.npmjs.org/xtend set size:undefined disposed:false
+91 silly placeDep ROOT split2@4.2.0 OK for: pgpass@1.0.5 want: ^4.1.0
+92 silly placeDep ROOT xtend@4.0.2 OK for: postgres-interval@1.2.0 want: ^4.0.0
+93 silly reify moves {}
+94 silly audit bulk request {
+94 silly audit   '@oxc-project/types': [ '0.149.0' ],
+94 silly audit   '@rolldown/binding-android-arm-eabi': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-android-arm64': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-darwin-arm64': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-darwin-x64': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-freebsd-x64': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-linux-arm-gnueabihf': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-linux-arm64-gnu': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-linux-arm64-musl': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-linux-ppc64-gnu': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-linux-s390x-gnu': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-linux-x64-gnu': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-linux-x64-musl': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-openharmony-arm64': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-win32-arm64-msvc': [ '1.2.8' ],
+94 silly audit   '@rolldown/binding-win32-x64-msvc': [ '1.2.8' ],
+94 silly audit   '@rolldown/pluginutils': [ '1.0.1' ],
+94 silly audit   '@types/react': [ '19.3.0' ],
+94 silly audit   '@types/react-dom': [ '19.3.0' ],
+94 silly audit   '@typescript/typescript-aix-ppc64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-darwin-arm64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-darwin-x64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-freebsd-arm64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-freebsd-x64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-linux-arm': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-linux-arm64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-linux-loong64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-linux-mips64el': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-linux-ppc64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-linux-riscv64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-linux-s390x': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-linux-x64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-netbsd-arm64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-netbsd-x64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-openbsd-arm64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-openbsd-x64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-sunos-x64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-win32-arm64': [ '7.0.2' ],
+94 silly audit   '@typescript/typescript-win32-x64': [ '7.0.2' ],
+94 silly audit   '@vitejs/plugin-react': [ '6.1.1' ],
+94 silly audit   csstype: [ '3.2.3' ],
+94 silly audit   'detect-libc': [ '2.1.2' ],
+94 silly audit   fdir: [ '6.5.0' ],
+94 silly audit   fsevents: [ '2.3.3' ],
+94 silly audit   lightningcss: [ '1.33.0' ],
+94 silly audit   'lightningcss-android-arm64': [ '1.33.0' ],
+94 silly audit   'lightningcss-darwin-arm64': [ '1.33.0' ],
+94 silly audit   'lightningcss-darwin-x64': [ '1.33.0' ],
+94 silly audit   'lightningcss-freebsd-x64': [ '1.33.0' ],
+94 silly audit   'lightningcss-linux-arm-gnueabihf': [ '1.33.0' ],
+94 silly audit   'lightningcss-linux-arm64-gnu': [ '1.33.0' ],
+94 silly audit   'lightningcss-linux-arm64-musl': [ '1.33.0' ],
+94 silly audit   'lightningcss-linux-x64-gnu': [ '1.33.0' ],
+94 silly audit   'lightningcss-linux-x64-musl': [ '1.33.0' ],
+94 silly audit   'lightningcss-win32-arm64-msvc': [ '1.33.0' ],
+94 silly audit   'lightningcss-win32-x64-msvc': [ '1.33.0' ],
+94 silly audit   nanoid: [ '3.3.19' ],
+94 silly audit   picocolors: [ '1.1.1' ],
+94 silly audit   picomatch: [ '4.0.7' ],
+94 silly audit   postcss: [ '8.5.28' ],
+94 silly audit   react: [ '19.3.0' ],
+94 silly audit   'react-dom': [ '19.3.0' ],
+94 silly audit   rolldown: [ '1.2.8' ],
+94 silly audit   scheduler: [ '0.28.0' ],
+94 silly audit   'source-map-js': [ '1.2.1' ],
+94 silly audit   tinyglobby: [ '0.2.17' ],
+94 silly audit   typescript: [ '7.0.2' ],
+94 silly audit   vite: [ '8.3.0' ],
+94 silly audit   pg: [ '8.23.0' ],
+94 silly audit   'pg-cloudflare': [ '1.4.0' ],
+94 silly audit   'pg-connection-string': [ '2.14.0' ],
+94 silly audit   'pg-pool': [ '3.14.0' ],
+94 silly audit   'pg-protocol': [ '1.16.0' ],
+94 silly audit   'pg-types': [ '2.2.0' ],
+94 silly audit   pgpass: [ '1.0.5' ],
+94 silly audit   'pg-int8': [ '1.0.1' ],
+94 silly audit   'postgres-array': [ '2.0.0' ],
+94 silly audit   'postgres-bytea': [ '1.0.1' ],
+94 silly audit   'postgres-date': [ '1.0.7' ],
+94 silly audit   'postgres-interval': [ '1.2.0' ],
+94 silly audit   split2: [ '4.2.0' ],
+94 silly audit   xtend: [ '4.0.2' ]
+94 silly audit }
+95 http cache xtend@https://registry.npmjs.org/xtend/-/xtend-4.0.2.tgz 0ms (cache hit)
+96 http cache split2@https://registry.npmjs.org/split2/-/split2-4.2.0.tgz 0ms (cache hit)
+97 http cache postgres-date@https://registry.npmjs.org/postgres-date/-/postgres-date-1.0.7.tgz 0ms (cache hit)
+98 http cache pg-int8@https://registry.npmjs.org/pg-int8/-/pg-int8-1.0.1.tgz 0ms (cache hit)
+99 http cache postgres-interval@https://registry.npmjs.org/postgres-interval/-/postgres-interval-1.2.0.tgz 0ms (cache hit)
+100 http cache postgres-bytea@https://registry.npmjs.org/postgres-bytea/-/postgres-bytea-1.0.1.tgz 1ms (cache hit)
+101 http cache postgres-array@https://registry.npmjs.org/postgres-array/-/postgres-array-2.0.0.tgz 0ms (cache hit)
+102 http cache pgpass@https://registry.npmjs.org/pgpass/-/pgpass-1.0.5.tgz 0ms (cache hit)
+103 http cache pg-types@https://registry.npmjs.org/pg-types/-/pg-types-2.2.0.tgz 0ms (cache hit)
+104 http cache pg-pool@https://registry.npmjs.org/pg-pool/-/pg-pool-3.14.0.tgz 0ms (cache hit)
+105 http cache pg-protocol@https://registry.npmjs.org/pg-protocol/-/pg-protocol-1.16.0.tgz 0ms (cache hit)
+106 http cache pg-connection-string@https://registry.npmjs.org/pg-connection-string/-/pg-connection-string-2.14.0.tgz 0ms (cache hit)
+107 silly tarball no local data for xtend@https://registry.npmjs.org/xtend/-/xtend-4.0.2.tgz. Extracting by manifest.
+108 silly tarball no local data for split2@https://registry.npmjs.org/split2/-/split2-4.2.0.tgz. Extracting by manifest.
+109 silly tarball no local data for postgres-date@https://registry.npmjs.org/postgres-date/-/postgres-date-1.0.7.tgz. Extracting by manifest.
+110 silly tarball no local data for pg-int8@https://registry.npmjs.org/pg-int8/-/pg-int8-1.0.1.tgz. Extracting by manifest.
+111 silly tarball no local data for postgres-interval@https://registry.npmjs.org/postgres-interval/-/postgres-interval-1.2.0.tgz. Extracting by manifest.
+112 silly tarball no local data for postgres-bytea@https://registry.npmjs.org/postgres-bytea/-/postgres-bytea-1.0.1.tgz. Extracting by manifest.
+113 silly tarball no local data for postgres-array@https://registry.npmjs.org/postgres-array/-/postgres-array-2.0.0.tgz. Extracting by manifest.
+114 silly tarball no local data for pgpass@https://registry.npmjs.org/pgpass/-/pgpass-1.0.5.tgz. Extracting by manifest.
+115 silly tarball no local data for pg-types@https://registry.npmjs.org/pg-types/-/pg-types-2.2.0.tgz. Extracting by manifest.
+116 silly tarball no local data for pg-pool@https://registry.npmjs.org/pg-pool/-/pg-pool-3.14.0.tgz. Extracting by manifest.
+117 silly tarball no local data for pg-protocol@https://registry.npmjs.org/pg-protocol/-/pg-protocol-1.16.0.tgz. Extracting by manifest.
+118 http cache pg-cloudflare@https://registry.npmjs.org/pg-cloudflare/-/pg-cloudflare-1.4.0.tgz 0ms (cache hit)
+119 http cache pg@https://registry.npmjs.org/pg/-/pg-8.23.0.tgz 0ms (cache hit)
+120 silly tarball no local data for pg-connection-string@https://registry.npmjs.org/pg-connection-string/-/pg-connection-string-2.14.0.tgz. Extracting by manifest.
+121 silly tarball no local data for pg-cloudflare@https://registry.npmjs.org/pg-cloudflare/-/pg-cloudflare-1.4.0.tgz. Extracting by manifest.
+122 silly tarball no local data for pg@https://registry.npmjs.org/pg/-/pg-8.23.0.tgz. Extracting by manifest.
+123 http fetch GET 200 https://registry.npmjs.org/postgres-date/-/postgres-date-1.0.7.tgz 100ms (cache miss)
+124 http fetch GET 200 https://registry.npmjs.org/postgres-bytea/-/postgres-bytea-1.0.1.tgz 100ms (cache miss)
+125 http fetch GET 200 https://registry.npmjs.org/postgres-interval/-/postgres-interval-1.2.0.tgz 101ms (cache miss)
+126 http fetch GET 200 https://registry.npmjs.org/pg-int8/-/pg-int8-1.0.1.tgz 103ms (cache miss)
+127 http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 673ms
+128 silly audit report {}
+129 http fetch GET 200 https://registry.npmjs.org/split2/-/split2-4.2.0.tgz 656ms (cache miss)
+130 http fetch GET 200 https://registry.npmjs.org/xtend/-/xtend-4.0.2.tgz 662ms (cache miss)
+131 http fetch GET 200 https://registry.npmjs.org/postgres-array/-/postgres-array-2.0.0.tgz 692ms (cache miss)
+132 http fetch GET 200 https://registry.npmjs.org/pgpass/-/pgpass-1.0.5.tgz 714ms (cache miss)
+133 http fetch GET 200 https://registry.npmjs.org/pg-connection-string/-/pg-connection-string-2.14.0.tgz 719ms (cache miss)
+134 http fetch GET 200 https://registry.npmjs.org/pg-pool/-/pg-pool-3.14.0.tgz 1291ms (cache miss)
+135 http fetch GET 200 https://registry.npmjs.org/pg-cloudflare/-/pg-cloudflare-1.4.0.tgz 1297ms (cache miss)
+136 http fetch GET 200 https://registry.npmjs.org/pg-types/-/pg-types-2.2.0.tgz 1321ms (cache miss)
+137 http fetch GET 200 https://registry.npmjs.org/pg/-/pg-8.23.0.tgz 1350ms (cache miss)
+138 http fetch GET 200 https://registry.npmjs.org/pg-protocol/-/pg-protocol-1.16.0.tgz 1399ms (cache miss)
+139 silly ADD node_modules/xtend
+140 silly ADD node_modules/split2
+141 silly ADD node_modules/postgres-interval
+142 silly ADD node_modules/postgres-date
+143 silly ADD node_modules/postgres-bytea
+144 silly ADD node_modules/postgres-array
+145 silly ADD node_modules/pg-int8
+146 silly ADD node_modules/pgpass
+147 silly ADD node_modules/pg-types
+148 silly ADD node_modules/pg-protocol
+149 silly ADD node_modules/pg-pool
+150 silly ADD node_modules/pg-connection-string
+151 silly ADD node_modules/pg-cloudflare
+152 silly ADD node_modules/pg
+153 verbose cwd C:\Users\rocky\Documents\Codex\2026-09-12\labflow-spec-md-ux-first-1
+154 verbose os Windows_NT 10.0.26200
+155 verbose node v24.21.0
+156 verbose npm  v11.19.0
+157 notice
+157 notice New major version of npm available! 11.19.0 -> 12.0.2
+157 notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2
+157 notice To update run: npm install -g npm@12.0.2
+157 notice  { force: true, Symbol(proc-log.meta): true }
+158 verbose exit 0
+159 info ok
