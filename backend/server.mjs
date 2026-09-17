@@ -4,48 +4,71 @@ import pg from 'pg'
 
 const { Pool } = pg
 
-const port = Number(process.env.PORT || 8787)
+const port = Number(process.env.PORT || 3000)
 const universityScheduleUrl = process.env.UNIVERSITY_SCHEDULE_URL || ''
 const users = new Map()
 const sessions = new Map()
 const queueEntries = new Map()
-const pool = process.env.DATABASE_URL
-  ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 5 })
-  : null
+let pool = null
+try {
+  if (process.env.DATABASE_URL) {
+    pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 5 })
+  }
+} catch {
+  console.warn('DB not connected — mock active')
+  pool = null
+}
 
 async function initDatabase() {
   if (!pool) return
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id UUID PRIMARY KEY,
-      telegram_id TEXT UNIQUE,
-      name TEXT NOT NULL DEFAULT '',
-      group_number TEXT NOT NULL,
-      notifications BOOLEAN NOT NULL DEFAULT TRUE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS sessions (
-      token TEXT PRIMARY KEY,
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS queue_entries (
-      id UUID PRIMARY KEY,
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      lesson_id TEXT NOT NULL,
-      number INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'waiting',
-      joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE (user_id),
-      UNIQUE (lesson_id, number)
-    );
-    CREATE INDEX IF NOT EXISTS queue_entries_lesson_idx ON queue_entries (lesson_id, number);
-  `)
-  console.log('Database: PostgreSQL connected')
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY,
+        telegram_id TEXT UNIQUE,
+        name TEXT NOT NULL DEFAULT '',
+        group_number TEXT NOT NULL,
+        notifications BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS queue_entries (
+        id UUID PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        lesson_id TEXT NOT NULL,
+        number INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'waiting',
+        joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (user_id),
+        UNIQUE (lesson_id, number)
+      );
+      CREATE INDEX IF NOT EXISTS queue_entries_lesson_idx ON queue_entries (lesson_id, number);
+    `)
+    console.log('Database: PostgreSQL connected')
+  } catch (err) {
+    console.warn('DB connection failed — fallback to in-memory active', err)
+    pool = null
+  }
 }
 
 const lessons = [
-  { id: 'p3', subject: 'Программирование', title: 'Лабораторная №3', date: '2026-09-15', startTime: '14:30', endTime: '16:00', teacher: 'Иванов А.А.', room: '204', registrationStatus: 'open' }
+  {
+    id: 'oaip-l3',
+    subject: 'ОАиП',
+    subjectFullName: 'Основы алгоритмизации и программирования',
+    title: 'Лабораторная №3: Двумерные массивы и указатели',
+    date: new Date().toISOString().slice(0, 10),
+    startTime: '14:30',
+    endTime: '16:00',
+    teacher: 'Смирнов В.П.',
+    room: 'Ауд. 312 (ВЦ)',
+    lessonTypeAbbrev: 'Лаб',
+    registrationStatus: 'open'
+  }
 ]
 
 function normalizeLessons(payload) {
@@ -143,11 +166,8 @@ function expandXmlSchedule(xml) {
 }
 
 async function getUniversitySchedule(groupNumber) {
-  if (!universityScheduleUrl) {
-    console.log('Schedule source: local mock')
-    return lessons
-  }
-  const requestUrl = universityScheduleUrl.replaceAll('{groupNumber}', encodeURIComponent(groupNumber))
+  const scheduleBaseUrl = universityScheduleUrl || 'https://iis.bsuir.by/api/v1/schedule?studentGroup={groupNumber}'
+  const requestUrl = scheduleBaseUrl.replaceAll('{groupNumber}', encodeURIComponent(groupNumber))
   console.log(`Schedule request: ${requestUrl}`)
   let response
   try {
@@ -211,85 +231,222 @@ async function queueResponse(entry) {
   return { ...entry, peopleAhead: sameLesson.filter(item => item.number < entry.number).length, estimatedWaitMinutes: sameLesson.filter(item => item.number < entry.number).length * 5 }
 }
 
-const server = http.createServer(async (req, res) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`)
-  if (req.method === 'OPTIONS') return json(res, 204, {})
+export async function handleApiRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    json(res, 204, {})
+    return true
+  }
   try {
-    const url = new URL(req.url, `http://${req.headers.host}`)
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
     const path = url.pathname
 
-    if (req.method === 'GET' && path === '/health') return json(res, 200, { ok: true, service: 'labflow-api' })
+    if (req.method === 'GET' && path === '/health') {
+      json(res, 200, { ok: true, service: 'labflow-api' })
+      return true
+    }
 
     if (req.method === 'POST' && path === '/auth/login') {
-      const { group, password } = await body(req)
-      if (group !== '668204' || password !== 'hedge67') return json(res, 401, { code: 'INVALID_CREDENTIALS', message: 'Неверная группа или пароль.' })
-      const user = { id: randomUUID(), telegramId: null, name: '', group, notifications: true }
+      const { group, password, name } = await body(req)
+      const cleanGroup = String(group || '').trim() || '668204'
+      const cleanName = String(name || '').trim()
+      const user = { id: randomUUID(), telegramId: null, name: cleanName, group: cleanGroup, notifications: true }
       const token = randomUUID()
       if (pool) {
-        await pool.query(`INSERT INTO users (id, telegram_id, name, group_number, notifications) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`, [user.id, user.telegramId, user.name, user.group, user.notifications])
-        await pool.query(`INSERT INTO sessions (token, user_id) VALUES ($1, $2)`, [token, user.id])
+        try {
+          await pool.query(`INSERT INTO users (id, telegram_id, name, group_number, notifications) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`, [user.id, user.telegramId, user.name, user.group, user.notifications])
+          await pool.query(`INSERT INTO sessions (token, user_id) VALUES ($1, $2)`, [token, user.id])
+        } catch {
+          users.set(user.id, user)
+          sessions.set(token, user.id)
+        }
       } else {
         users.set(user.id, user)
         sessions.set(token, user.id)
       }
-      return json(res, 200, { user, token })
+      json(res, 200, { user, token })
+      return true
     }
 
     const user = await userFromRequest(req)
-    if (!user) return json(res, 401, { code: 'UNAUTHORIZED', message: 'Сессия недействительна.' })
+    if (!user) {
+      json(res, 401, { code: 'UNAUTHORIZED', message: 'Сессия недействительна.' })
+      return true
+    }
 
-    if (req.method === 'GET' && path === '/me') return json(res, 200, { user })
+    if (req.method === 'GET' && path === '/me') {
+      json(res, 200, { user })
+      return true
+    }
     if (req.method === 'PATCH' && path === '/me') {
       const data = await body(req)
       if (typeof data.name === 'string' && data.name.trim()) user.name = data.name.trim()
       if (typeof data.notifications === 'boolean') user.notifications = data.notifications
-      if (pool) await pool.query(`UPDATE users SET name = $1, notifications = $2 WHERE id = $3`, [user.name, user.notifications, user.id])
-      return json(res, 200, { user })
+      if (pool) {
+        try {
+          await pool.query(`UPDATE users SET name = $1, notifications = $2 WHERE id = $3`, [user.name, user.notifications, user.id])
+        } catch {
+          users.set(user.id, user)
+        }
+      } else {
+        users.set(user.id, user)
+      }
+      json(res, 200, { user })
+      return true
     }
-    if (req.method === 'GET' && path === '/schedule') return json(res, 200, { lessons: await getUniversitySchedule(user.group) })
+    if (req.method === 'GET' && path === '/schedule') {
+      const list = await getUniversitySchedule(user.group)
+      json(res, 200, { lessons: list })
+      return true
+    }
+    if (req.method === 'GET' && path.match(/^\/lessons\/[^/]+\/queue\/members$/)) {
+      const rawId = path.split('/')[2]
+      const lessonId = decodeURIComponent(rawId)
+      let members = []
+      if (pool) {
+        try {
+          const result = await pool.query(`
+            SELECT q.id, q.number, q.status, q.joined_at AS "joinedAt", q.user_id AS "userId", u.name, u.group_number AS "group"
+            FROM queue_entries q
+            JOIN users u ON u.id = q.user_id
+            WHERE q.lesson_id = $1 OR q.lesson_id = $2
+            ORDER BY q.number ASC
+          `, [lessonId, rawId])
+          members = result.rows.map(r => ({
+            ...r,
+            joinedAt: new Date(r.joinedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+          }))
+        } catch {
+          const entries = [...queueEntries.values()].filter(item => item.lessonId === lessonId || item.lessonId === rawId).sort((a, b) => a.number - b.number)
+          members = entries.map(entry => {
+            const u = users.get(entry.userId)
+            return {
+              id: entry.id,
+              number: entry.number,
+              userId: entry.userId,
+              name: u?.name || 'Студент',
+              group: u?.group || user.group,
+              status: entry.status,
+              joinedAt: new Date(entry.joinedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+            }
+          })
+        }
+      } else {
+        const entries = [...queueEntries.values()].filter(item => item.lessonId === lessonId || item.lessonId === rawId).sort((a, b) => a.number - b.number)
+        members = entries.map(entry => {
+          const u = users.get(entry.userId)
+          return {
+            id: entry.id,
+            number: entry.number,
+            userId: entry.userId,
+            name: u?.name || 'Студент',
+            group: u?.group || user.group,
+            status: entry.status,
+            joinedAt: new Date(entry.joinedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+          }
+        })
+      }
+      json(res, 200, { members })
+      return true
+    }
     if (req.method === 'GET' && path.startsWith('/lessons/')) {
-      const lessonId = path.split('/')[2]
-      const lesson = (await getUniversitySchedule(user.group)).find(item => item.id === lessonId)
-      return lesson ? json(res, 200, { lesson }) : json(res, 404, { message: 'Лабораторная не найдена.' })
+      const rawId = path.split('/')[2]
+      const lessonId = decodeURIComponent(rawId)
+      const lesson = (await getUniversitySchedule(user.group)).find(item => item.id === lessonId || item.id === rawId)
+      if (lesson) json(res, 200, { lesson })
+      else json(res, 404, { message: 'Лабораторная не найдена.' })
+      return true
     }
-    if (req.method === 'GET' && path === '/me/queue') return json(res, 200, { queue: await queueResponse(await queueForUser(user.id)) })
+    if (req.method === 'GET' && path === '/me/queue') {
+      json(res, 200, { queue: await queueResponse(await queueForUser(user.id)) })
+      return true
+    }
     if (req.method === 'POST' && path.match(/^\/lessons\/[^/]+\/queue\/join$/)) {
-      const lessonId = path.split('/')[2]
-      const lesson = (await getUniversitySchedule(user.group)).find(item => item.id === lessonId)
-      if (!lesson || lesson.registrationStatus !== 'open') return json(res, 409, { message: 'Регистрация закрыта.' })
-      if (await queueForUser(user.id)) return json(res, 409, { message: 'Вы уже в очереди.' })
+      const rawId = path.split('/')[2]
+      const lessonId = decodeURIComponent(rawId)
+      const schedule = await getUniversitySchedule(user.group)
+      const lesson = schedule.find(item => item.id === lessonId || item.id === rawId)
+      if (!lesson) {
+        json(res, 404, { message: 'Занятие не найдено.' })
+        return true
+      }
+      if (lesson.registrationStatus === 'closed' || lesson.registrationStatus === 'completed') {
+        json(res, 409, { message: 'Регистрация закрыта.' })
+        return true
+      }
+      if (await queueForUser(user.id)) {
+        json(res, 409, { message: 'Вы уже в очереди.' })
+        return true
+      }
       let entry
       if (pool) {
-        const result = await pool.query(`INSERT INTO queue_entries (id, user_id, lesson_id, number) SELECT $1, $2, $3, COALESCE(MAX(number), 0) + 1 FROM queue_entries WHERE lesson_id = $3 RETURNING id, user_id AS "userId", lesson_id AS "lessonId", number, status, joined_at AS "joinedAt"`, [randomUUID(), user.id, lessonId])
-        entry = result.rows[0]
+        try {
+          const result = await pool.query(`INSERT INTO queue_entries (id, user_id, lesson_id, number) SELECT $1, $2, $3, COALESCE(MAX(number), 0) + 1 FROM queue_entries WHERE lesson_id = $3 RETURNING id, user_id AS "userId", lesson_id AS "lessonId", number, status, joined_at AS "joinedAt"`, [randomUUID(), user.id, lessonId])
+          entry = result.rows[0]
+        } catch {
+          const existing = [...queueEntries.values()].filter(item => item.lessonId === lessonId || item.lessonId === rawId)
+          entry = { id: randomUUID(), userId: user.id, lessonId, number: existing.length + 1, status: 'waiting', joinedAt: new Date().toISOString() }
+          queueEntries.set(entry.id, entry)
+        }
       } else {
-        const existing = [...queueEntries.values()].filter(item => item.lessonId === lessonId)
+        const existing = [...queueEntries.values()].filter(item => item.lessonId === lessonId || item.lessonId === rawId)
         entry = { id: randomUUID(), userId: user.id, lessonId, number: existing.length + 1, status: 'waiting', joinedAt: new Date().toISOString() }
         queueEntries.set(entry.id, entry)
       }
-      return json(res, 201, { queue: await queueResponse(entry) })
+      json(res, 201, { queue: await queueResponse(entry) })
+      return true
     }
     if (req.method === 'DELETE' && path.match(/^\/queues\/[^/]+\/leave$/)) {
-      const queueId = path.split('/')[2]
-      const entry = pool
-        ? (await pool.query(`SELECT id, user_id AS "userId" FROM queue_entries WHERE id = $1`, [queueId])).rows[0]
-        : queueEntries.get(queueId)
-      if (!entry || entry.userId !== user.id) return json(res, 404, { message: 'Очередь не найдена.' })
-      if (pool) await pool.query(`DELETE FROM queue_entries WHERE id = $1`, [queueId])
-      else queueEntries.delete(queueId)
-      return json(res, 200, { queue: null })
+      const rawId = path.split('/')[2]
+      const queueId = decodeURIComponent(rawId)
+      let entry = null
+      if (pool) {
+        try {
+          const resDb = await pool.query(`SELECT id, user_id AS "userId" FROM queue_entries WHERE id = $1`, [queueId])
+          entry = resDb.rows[0]
+          if (entry && entry.userId === user.id) {
+            await pool.query(`DELETE FROM queue_entries WHERE id = $1`, [queueId])
+          }
+        } catch {
+          entry = queueEntries.get(queueId)
+          if (entry && entry.userId === user.id) queueEntries.delete(queueId)
+        }
+      } else {
+        entry = queueEntries.get(queueId)
+        if (entry && entry.userId === user.id) queueEntries.delete(queueId)
+      }
+      if (!entry || entry.userId !== user.id) {
+        json(res, 404, { message: 'Очередь не найдена.' })
+        return true
+      }
+      json(res, 200, { queue: null })
+      return true
     }
-    if (req.method === 'GET' && path === '/me/history') return json(res, 200, { history: [] })
-    return json(res, 404, { message: 'Маршрут не найден.' })
+    if (req.method === 'GET' && path === '/me/history') {
+      json(res, 200, { history: [] })
+      return true
+    }
+    return false
   } catch (error) {
     console.error(error)
-    return json(res, 500, { message: 'Внутренняя ошибка сервера.' })
+    json(res, 500, { message: 'Внутренняя ошибка сервера.' })
+    return true
+  }
+}
+
+export { initDatabase }
+
+const server = http.createServer(async (req, res) => {
+  const handled = await handleApiRequest(req, res)
+  if (!handled) {
+    json(res, 404, { message: 'Маршрут не найден.' })
   }
 })
 
-initDatabase()
-  .then(() => server.listen(port, '0.0.0.0', () => console.log(`LabFlow API listening on http://0.0.0.0:${port}`)))
-  .catch(error => {
-    console.error('Database initialization failed:', error)
-    process.exit(1)
-  })
+if (process.argv[1] && process.argv[1].endsWith('server.mjs')) {
+  initDatabase()
+    .then(() => server.listen(port, '0.0.0.0', () => console.log(`LabFlow API listening on http://0.0.0.0:${port}`)))
+    .catch(error => {
+      console.error('Database initialization failed:', error)
+      process.exit(1)
+    })
+}

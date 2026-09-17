@@ -1,0 +1,6 @@
+{
+  "name": "LabFlow",
+  "description": "Telegram Mini App for student laboratory schedules and electronic queues.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
