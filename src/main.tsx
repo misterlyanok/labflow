@@ -70,6 +70,24 @@ function App() {
     }
   }, [user?.group, user?.name])
 
+  // Periodic polling for queue sync across different devices/browsers
+  useEffect(() => {
+    if (!user || !user.name || !lesson) return
+    const interval = setInterval(async () => {
+      try {
+        const [activeQueue, members] = await Promise.all([
+          api.getQueue(user, lesson.id),
+          api.getQueueMembers(lesson.id)
+        ])
+        setQueue(activeQueue)
+        setQueueMembers(members)
+      } catch (e) {
+        // silent background sync
+      }
+    }, 4000)
+    return () => clearInterval(interval)
+  }, [user?.name, lesson?.id])
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (isSubmitting) return
@@ -289,6 +307,15 @@ function App() {
                 members={queueMembers}
                 onJoin={joinQueue}
                 onLeave={leaveQueue}
+                onRefresh={async () => {
+                  if (!lesson) return
+                  const [q, mems] = await Promise.all([
+                    api.getQueue(user, lesson.id),
+                    api.getQueueMembers(lesson.id)
+                  ])
+                  setQueue(q)
+                  setQueueMembers(mems)
+                }}
               />
             )}
 
@@ -433,7 +460,8 @@ function QueueView({
   user,
   members,
   onJoin,
-  onLeave
+  onLeave,
+  onRefresh
 }: {
   queue: Queue | null
   lesson: Lesson | null
@@ -441,10 +469,22 @@ function QueueView({
   members: QueueMember[]
   onJoin: () => void
   onLeave: () => void
+  onRefresh?: () => void
 }) {
+  const [refreshing, setRefreshing] = useState(false)
   const activeMembers = members.filter(m => m.status !== 'completed')
   const servingMember = members.find(m => m.status === 'serving')
   const isUserInQueue = Boolean(queue)
+
+  const handleManualRefresh = async () => {
+    if (!onRefresh || refreshing) return
+    setRefreshing(true)
+    try {
+      await onRefresh()
+    } finally {
+      setTimeout(() => setRefreshing(false), 500)
+    }
+  }
 
   return (
     <>
@@ -506,9 +546,21 @@ function QueueView({
       )}
 
       {/* Full list of students: showing place and name of each student */}
-      <div className="section-title">
-        <h2>Студенты в очереди ({activeMembers.length})</h2>
-        <span className="muted">Имя и место каждого</span>
+      <div className="section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2>Студенты в очереди ({activeMembers.length})</h2>
+          <span className="muted">Имя и место каждого · автообновление</span>
+        </div>
+        {onRefresh && (
+          <button
+            className="secondary"
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+            style={{ padding: '6px 12px', fontSize: 13, borderRadius: 10 }}
+          >
+            {refreshing ? 'Обновление...' : '↻ Обновить'}
+          </button>
+        )}
       </div>
 
       <div className="queue-members-list">
