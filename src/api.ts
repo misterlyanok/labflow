@@ -311,11 +311,19 @@ export const api = {
   },
 
   async leaveQueue(user: User, queueId?: string, lessonId?: string): Promise<void> {
-    if (queueId) {
-      try {
-        await remote(`/queues/${queueId}/leave`, { method: 'DELETE' })
-      } catch (err) {
-        console.warn('Remote leaveQueue failed:', err)
+    try {
+      await remote('/me/queue', { method: 'DELETE' })
+    } catch (err) {
+      console.warn('DELETE /me/queue failed, trying alternative routes:', err)
+      if (queueId) {
+        try {
+          await remote(`/queues/${queueId}/leave`, { method: 'DELETE' })
+        } catch {}
+      }
+      if (lessonId) {
+        try {
+          await remote(`/lessons/${lessonId}/queue/leave`, { method: 'POST' })
+        } catch {}
       }
     }
 
@@ -323,10 +331,18 @@ export const api = {
       const members = (await this.getQueueMembers(lessonId)).filter(
         m => m.name.toLowerCase() !== user.name.toLowerCase()
       )
-      // Renumber
       const renumbered = members.map((m, idx) => ({ ...m, number: idx + 1 }))
       localStorage.setItem(STORAGE_QUEUE_PREFIX + lessonId, JSON.stringify(renumbered))
     }
+  },
+
+  async resetQueue(lessonId: string): Promise<void> {
+    try {
+      await remote(`/lessons/${lessonId}/queue/reset`, { method: 'POST' })
+    } catch (err) {
+      console.warn('Remote resetQueue failed:', err)
+    }
+    localStorage.removeItem(STORAGE_QUEUE_PREFIX + lessonId)
   },
 
   async history(): Promise<unknown[]> {

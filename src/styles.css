@@ -162,3 +162,252 @@
   margin-top: -6px;
 }
 
+/* Day-grouped Schedule styles */
+.schedule-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.schedule-filters-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.schedule-filter-btn {
+  padding: 6px 13px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  border-radius: 12px !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  box-shadow: none !important;
+}
+
+.schedule-day-group {
+  margin-bottom: 22px;
+  background: linear-gradient(145deg, #10325fbb, #0a244abb);
+  border: 1px solid #4a82af33;
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px #00000028;
+}
+
+.schedule-day-group.is-today-group {
+  border-color: #5ee0ff66;
+  background: linear-gradient(145deg, #13427abb, #0c2c56bb);
+  box-shadow: 0 0 0 1px #5ee0ff44, 0 10px 30px #21bee820;
+}
+
+.schedule-day-header {
+  padding: 14px 18px;
+  background: #081d3d88;
+  border-bottom: 1px solid #3c6e9a33;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.schedule-day-title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.schedule-day-name {
+  font-size: 16px;
+  font-weight: 800;
+  color: #f1f8ff;
+  text-transform: capitalize;
+}
+
+.schedule-day-date {
+  font-size: 13px;
+  color: #92b7d8;
+  font-weight: 600;
+}
+
+.schedule-day-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.day-badge {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.day-badge.today {
+  background: #60e0ff;
+  color: #03142f;
+}
+
+.day-badge.tomorrow {
+  background: #205c90;
+  color: #9fe2ff;
+  border: 1px solid #60e0ff55;
+}
+
+.day-badge.count {
+  background: #0d274c;
+  color: #8bb2d4;
+  border: 1px solid #3c6e9a44;
+}
+
+.schedule-day-lessons {
+  display: flex;
+  flex-direction: column;
+}
+
+.schedule-lesson-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 13px 18px;
+  border-bottom: 1px solid #3c6e9a22;
+  transition: background 0.15s ease;
+}
+
+.schedule-lesson-row:last-child {
+  border-bottom: none;
+}
+
+.schedule-lesson-row.is-oaip-row {
+  background: #174b7625;
+}
+
+.schedule-lesson-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+}
+
+.schedule-time-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  flex-shrink: 0;
+}
+
+.schedule-time-start {
+  font-size: 15px;
+  font-weight: 800;
+  color: #7ee8ff;
+  line-height: 1.1;
+}
+
+.schedule-time-end {
+  font-size: 11px;
+  color: #7a9ec0;
+  margin-top: 2px;
+}
+
+.schedule-lesson-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.schedule-lesson-subject-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.schedule-lesson-subject {
+  font-size: 15px;
+  font-weight: 750;
+  color: #f1f8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lesson-type-pill {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 6px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.lesson-type-pill.lr {
+  background: #14597b;
+  color: #7ee8ff;
+  border: 1px solid #7ee8ff66;
+}
+
+.lesson-type-pill.pz {
+  background: #2b396e;
+  color: #b9c7ff;
+  border: 1px solid #8c9fff44;
+}
+
+.lesson-type-pill.lk {
+  background: #463b1a;
+  color: #ffd875;
+  border: 1px solid #ffd87544;
+}
+
+.lesson-type-pill.default {
+  background: #193859;
+  color: #a4c8e8;
+}
+
+.schedule-lesson-title {
+  font-size: 12px;
+  color: #c4e0f8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.schedule-lesson-meta {
+  font-size: 11px;
+  color: #7a9ec0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.schedule-lesson-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  flex-shrink: 0;
+}
+
+.schedule-btn-queue {
+  padding: 7px 11px !important;
+  font-size: 12px !important;
+  border-radius: 10px !important;
+  background: linear-gradient(135deg, #60e0ff, #20b8e7) !important;
+  color: #03142f !important;
+  font-weight: 800 !important;
+  box-shadow: 0 4px 12px #21bde828 !important;
+}
+
+.schedule-btn-info {
+  padding: 7px 10px !important;
+  font-size: 12px !important;
+  border-radius: 10px !important;
+}
+
+

@@ -81,45 +81,152 @@ function normalizeLessons(payload) {
       : candidate && typeof candidate === 'object'
         ? Object.entries(candidate).flatMap(([key, value]) => Array.isArray(value) ? value.map(item => ({ item, outerDate: isDate(key) ? key : '' })) : [])
         : []
-  return source.map(({ item, outerDate }, index) => ({
-    id: String(item.id || item.lessonId || item.universityId || `university-lesson-${index + 1}`),
-    subject: String(item.subject || item.subjectName || item.subjectFullName || 'Занятие'),
-    subjectId: String(item.subjectId || item.subjectCode || (item.subject || item.subjectName || 'lab').toLowerCase().replace(/[^a-zа-я0-9]+/gi, '-')),
-    title: String(item.title || item.name || item.subjectFullName || item.subject || `Занятие №${index + 1}`),
-    date: String(item.date || (isDate(item.dateLesson) ? item.dateLesson : '') || outerDate || (isDate(item.startLessonDate) ? item.startLessonDate : 'Дата не указана')),
-    startTime: String(item.startTime || item.start || item.startLessonTime || item.timeFrom || ''),
-    endTime: String(item.endTime || item.end || item.endLessonTime || item.timeTo || ''),
-    teacher: item.teacher || item.instructor || (Array.isArray(item.employees) && item.employees[0] ? [item.employees[0].lastName, item.employees[0].firstName, item.employees[0].middleName].filter(Boolean).join(' ') : undefined),
-    room: item.room || item.classroom || (Array.isArray(item.auditories) ? item.auditories[0] : undefined),
-    note: item.note || undefined,
-    lessonTypeAbbrev: item.lessonTypeAbbrev || undefined,
-    registrationStatus: item.registrationStatus || item.registration || 'open',
-    registration: item.registration || item.registrationStatus || 'open'
-  })).filter(item => item.date && item.startTime)
+  const toStandardDate = val => {
+    const d = parseDate(val)
+    return d ? formatYMD(d) : String(val || '')
+  }
+
+  const mapped = source.map(({ item, outerDate }, index) => {
+    const rawDate = String(item.date || (isDate(item.dateLesson) ? item.dateLesson : '') || outerDate || (isDate(item.startLessonDate) ? item.startLessonDate : ''))
+    const date = toStandardDate(rawDate) || rawDate
+    return {
+      id: String(item.id || item.lessonId || item.universityId || `university-lesson-${index + 1}`),
+      subject: String(item.subject || item.subjectName || item.subjectFullName || 'Занятие'),
+      subjectId: String(item.subjectId || item.subjectCode || (item.subject || item.subjectName || 'lab').toLowerCase().replace(/[^a-zа-я0-9]+/gi, '-')),
+      title: String(item.title || item.name || item.subjectFullName || item.subject || `Занятие №${index + 1}`),
+      date,
+      startTime: String(item.startTime || item.start || item.startLessonTime || item.timeFrom || ''),
+      endTime: String(item.endTime || item.end || item.endLessonTime || item.timeTo || ''),
+      teacher: item.teacher || item.instructor || (Array.isArray(item.employees) && item.employees[0] ? [item.employees[0].lastName, item.employees[0].firstName, item.employees[0].middleName].filter(Boolean).join(' ') : undefined),
+      room: item.room || item.classroom || (Array.isArray(item.auditories) ? item.auditories[0] : undefined),
+      note: item.note || undefined,
+      lessonTypeAbbrev: item.lessonTypeAbbrev || undefined,
+      registrationStatus: item.registrationStatus || item.registration || 'open',
+      registration: item.registration || item.registrationStatus || 'open'
+    }
+  }).filter(item => item.date && item.startTime)
+
+  // Sort chronologically by date ascending, then startTime ascending
+  return mapped.sort((a, b) => {
+    const d = a.date.localeCompare(b.date)
+    if (d !== 0) return d
+    return a.startTime.localeCompare(b.startTime)
+  })
 }
 
 const weekdayNames = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
 const xmlValue = (block, tag) => block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i'))?.[1]?.trim() || ''
 const xmlValues = (block, tag) => [...block.matchAll(new RegExp(`<${tag}>([^<]*)</${tag}>`, 'gi'))].map(match => match[1].trim()).filter(Boolean)
-const parseDate = value => { const text = String(value || ''); const ru = text.match(/^(\d{2})\.(\d{2})\.(\d{4})$/); const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/); return ru ? new Date(`${ru[3]}-${ru[2]}-${ru[1]}T00:00:00`) : iso ? new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00`) : null }
-const isoDate = date => date.toISOString().slice(0, 10)
+const parseDate = value => {
+  const text = String(value || '').trim()
+  const ru = text.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+  if (ru) return new Date(Number(ru[3]), Number(ru[2]) - 1, Number(ru[1]), 12, 0, 0)
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), 12, 0, 0)
+  return null
+}
+const formatYMD = date => {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
 
-function expandWeeklyEntries(entries, weekday, termStart) {
+function getMinskDate() {
+  const now = new Date()
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000
+  return new Date(utc + 3 * 3600000)
+}
+
+function isLessonEnded(lesson) {
+  if (!lesson || !lesson.date) return false
+  const minskNow = getMinskDate()
+  const todayYMD = formatYMD(minskNow)
+
+  if (lesson.date < todayYMD) return true
+  if (lesson.date > todayYMD) return false
+
+  if (!lesson.endTime) return false
+  const [endH, endM] = lesson.endTime.split(':').map(Number)
+  if (isNaN(endH) || isNaN(endM)) return false
+
+  const currentTotal = minskNow.getHours() * 60 + minskNow.getMinutes()
+  const endTotal = endH * 60 + endM
+
+  return currentTotal >= endTotal
+}
+
+function getWeekNumber(date, termStart, currentWeek, todayDate) {
+  if (currentWeek && todayDate) {
+    const dayOfWeekToday = (todayDate.getDay() + 6) % 7
+    const mondayToday = new Date(todayDate)
+    mondayToday.setDate(mondayToday.getDate() - dayOfWeekToday)
+    mondayToday.setHours(12, 0, 0, 0)
+
+    const dayOfWeekTarget = (date.getDay() + 6) % 7
+    const mondayTarget = new Date(date)
+    mondayTarget.setDate(mondayTarget.getDate() - dayOfWeekTarget)
+    mondayTarget.setHours(12, 0, 0, 0)
+
+    const diffWeeks = Math.round((mondayTarget.getTime() - mondayToday.getTime()) / (7 * 86400000))
+    return ((((currentWeek - 1 + diffWeeks) % 4) + 4) % 4) + 1
+  }
+
+  if (termStart) {
+    const dayOfWeekTerm = (termStart.getDay() + 6) % 7
+    const mondayTerm = new Date(termStart)
+    mondayTerm.setDate(mondayTerm.getDate() - dayOfWeekTerm)
+    mondayTerm.setHours(12, 0, 0, 0)
+
+    const dayOfWeekTarget = (date.getDay() + 6) % 7
+    const mondayTarget = new Date(date)
+    mondayTarget.setDate(mondayTarget.getDate() - dayOfWeekTarget)
+    mondayTarget.setHours(12, 0, 0, 0)
+
+    const diffWeeks = Math.floor((mondayTarget.getTime() - mondayTerm.getTime()) / (7 * 86400000))
+    return (((diffWeeks % 4) + 4) % 4) + 1
+  }
+
+  const year = date.getFullYear()
+  const month = date.getMonth()
+  const termStartEstimated = month >= 7 ? new Date(year, 8, 1, 12, 0, 0) : new Date(year, 1, 7, 12, 0, 0)
+  const dayOfWeekEst = (termStartEstimated.getDay() + 6) % 7
+  const mondayEst = new Date(termStartEstimated)
+  mondayEst.setDate(mondayEst.getDate() - dayOfWeekEst)
+  mondayEst.setHours(12, 0, 0, 0)
+
+  const dayOfWeekTarget = (date.getDay() + 6) % 7
+  const mondayTarget = new Date(date)
+  mondayTarget.setDate(mondayTarget.getDate() - dayOfWeekTarget)
+  mondayTarget.setHours(12, 0, 0, 0)
+
+  const diffWeeks = Math.floor((mondayTarget.getTime() - mondayEst.getTime()) / (7 * 86400000))
+  return (((diffWeeks % 4) + 4) % 4) + 1
+}
+
+function expandWeeklyEntries(entries, weekday, termStart, termEnd, currentWeek, todayDate) {
   if (!Array.isArray(entries)) return []
   const result = []
   entries.forEach((item, index) => {
-    const start = parseDate(item.startLessonDate)
-    const end = parseDate(item.endLessonDate)
+    const start = parseDate(item.startLessonDate) || termStart
+    const end = parseDate(item.endLessonDate) || termEnd
     const oneOffDate = parseDate(item.dateLesson)
     const weeks = (Array.isArray(item.weekNumber) ? item.weekNumber : []).map(Number).filter(Boolean)
-    const add = date => result.push({ ...item, id: `${item.id || item.lessonId || item.subject || 'lesson'}-${isoDate(date)}-${item.startLessonTime || item.startTime || ''}-${index}`, date: isoDate(date) })
+    const add = date => {
+      const dStr = formatYMD(date)
+      result.push({
+        ...item,
+        id: `${item.id || item.lessonId || item.subject || 'lesson'}-${dStr}-${item.startLessonTime || item.startTime || ''}-${index}`,
+        date: dStr
+      })
+    }
     if (oneOffDate) return add(oneOffDate)
     if (!start || !end || !weeks.length) return
-    const cycleStart = termStart || start
-    for (const date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
-      if (date.getDay() !== weekday) continue
-      const week = Math.floor((date - cycleStart) / 86400000 / 7) % 4 + 1
-      if (weeks.includes(week)) add(new Date(date))
+
+    for (let cur = new Date(start); cur <= end; cur.setDate(cur.getDate() + 1)) {
+      if (cur.getDay() !== weekday) continue
+      const week = getWeekNumber(cur, termStart, currentWeek, todayDate)
+      if (weeks.includes(week)) add(new Date(cur))
     }
   })
   return result
@@ -128,37 +235,55 @@ function expandWeeklyEntries(entries, weekday, termStart) {
 function expandJsonSchedule(payload) {
   const schedules = payload?.schedules
   if (!schedules || Array.isArray(schedules) || typeof schedules !== 'object') return payload
-  const termStart = parseDate(payload.startDate)
+  const termStart = parseDate(payload.startDate || payload.dateStart)
+  const termEnd = parseDate(payload.endDate || payload.dateEnd)
+  const currentWeek = Number(payload.currentWeekNumber) || undefined
+  const todayDate = parseDate(payload.todayDate)
+
   const entries = Object.entries(schedules).flatMap(([dayName, lessonsForDay]) => {
     const weekday = weekdayNames.indexOf(dayName.toLowerCase())
-    return weekday > 0 ? expandWeeklyEntries(lessonsForDay, weekday, termStart) : []
+    return weekday > 0 ? expandWeeklyEntries(lessonsForDay, weekday, termStart, termEnd, currentWeek, todayDate) : []
   })
   return entries.length ? entries : payload
 }
 
 function expandXmlSchedule(xml) {
   const schedules = xml.match(/<schedules>([\s\S]*?)<\/schedules>/i)?.[1] || ''
-  const termStart = parseDate(xmlValue(xml, 'startDate'))
+  const termStart = parseDate(xmlValue(xml, 'startDate') || xmlValue(xml, 'dateStart'))
+  const termEnd = parseDate(xmlValue(xml, 'endDate') || xmlValue(xml, 'dateEnd'))
+  const currentWeek = Number(xmlValue(xml, 'currentWeekNumber')) || undefined
+  const todayDate = parseDate(xmlValue(xml, 'todayDate'))
   const result = []
   const dayPattern = new RegExp(`<(${weekdayNames.slice(1).join('|')})>([\\s\\S]*?)</\\1>`, 'gi')
   for (const dayMatch of schedules.matchAll(dayPattern)) {
     const weekday = weekdayNames.indexOf(dayMatch[1].toLowerCase())
     const block = dayMatch[2]
-    const start = parseDate(xmlValue(block, 'startLessonDate'))
-    const end = parseDate(xmlValue(block, 'endLessonDate'))
+    const start = parseDate(xmlValue(block, 'startLessonDate')) || termStart
+    const end = parseDate(xmlValue(block, 'endLessonDate')) || termEnd
     const subject = xmlValue(block, 'subject')
     const subjectFullName = xmlValue(block, 'subjectFullName')
     const weekNumbers = xmlValues(block, 'weekNumber').map(Number).filter(Boolean)
     const dateLesson = parseDate(xmlValue(block, 'dateLesson'))
-    const base = { subject, subjectFullName, title: subjectFullName || subject, startLessonTime: xmlValue(block, 'startLessonTime'), endLessonTime: xmlValue(block, 'endLessonTime'), lessonTypeAbbrev: xmlValue(block, 'lessonTypeAbbrev'), note: xmlValue(block, 'note'), room: xmlValues(block, 'auditories')[0] || '' }
-    const addLesson = date => result.push({ ...base, date: isoDate(date), id: `${subject}-${isoDate(date)}-${base.startLessonTime}` })
+    const base = {
+      subject,
+      subjectFullName,
+      title: subjectFullName || subject,
+      startLessonTime: xmlValue(block, 'startLessonTime'),
+      endLessonTime: xmlValue(block, 'endLessonTime'),
+      lessonTypeAbbrev: xmlValue(block, 'lessonTypeAbbrev'),
+      note: xmlValue(block, 'note'),
+      room: xmlValues(block, 'auditories')[0] || ''
+    }
+    const addLesson = date => {
+      const dStr = formatYMD(date)
+      result.push({ ...base, date: dStr, id: `${subject}-${dStr}-${base.startLessonTime}` })
+    }
     if (dateLesson) addLesson(dateLesson)
     else if (start && end && weekNumbers.length) {
-      for (const date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
-        if (date.getDay() !== weekday) continue
-        const cycleStart = termStart || start
-        const week = Math.floor((date - cycleStart) / 86400000 / 7) % 4 + 1
-        if (weekNumbers.includes(week)) addLesson(new Date(date))
+      for (let cur = new Date(start); cur <= end; cur.setDate(cur.getDate() + 1)) {
+        if (cur.getDay() !== weekday) continue
+        const week = getWeekNumber(cur, termStart, currentWeek, todayDate)
+        if (weekNumbers.includes(week)) addLesson(new Date(cur))
       }
     }
   }
@@ -212,12 +337,33 @@ async function userFromRequest(req) {
   return userId ? users.get(userId) : null
 }
 
-async function queueForUser(userId) {
+async function queueForUser(userId, group) {
+  let entry = null
   if (pool) {
     const result = await pool.query(`SELECT id, user_id AS "userId", lesson_id AS "lessonId", number, status, joined_at AS "joinedAt" FROM queue_entries WHERE user_id = $1`, [userId])
-    return result.rows[0] || null
+    entry = result.rows[0] || null
+  } else {
+    entry = [...queueEntries.values()].find(e => e.userId === userId) || null
   }
-  return [...queueEntries.values()].find(entry => entry.userId === userId) || null
+  if (!entry) return null
+
+  // If lesson has ended, auto-clean old entry
+  if (group) {
+    try {
+      const schedule = await getUniversitySchedule(group)
+      const lesson = schedule.find(l => l.id === entry.lessonId)
+      if (lesson && isLessonEnded(lesson)) {
+        if (pool) {
+          await pool.query(`DELETE FROM queue_entries WHERE id = $1`, [entry.id]).catch(() => {})
+        } else {
+          queueEntries.delete(entry.id)
+        }
+        return null
+      }
+    } catch {}
+  }
+
+  return entry
 }
 
 async function queueResponse(entry) {
@@ -301,6 +447,22 @@ export async function handleApiRequest(req, res) {
     if (req.method === 'GET' && path.match(/^\/lessons\/[^/]+\/queue\/members$/)) {
       const rawId = path.split('/')[2]
       const lessonId = decodeURIComponent(rawId)
+      const schedule = await getUniversitySchedule(user.group).catch(() => [])
+      const lesson = schedule.find(item => item.id === lessonId || item.id === rawId)
+
+      // Auto-reset queue if lesson is already ended!
+      if (lesson && isLessonEnded(lesson)) {
+        if (pool) {
+          await pool.query(`DELETE FROM queue_entries WHERE lesson_id = $1 OR lesson_id = $2`, [lessonId, rawId]).catch(() => {})
+        } else {
+          for (const [id, e] of queueEntries.entries()) {
+            if (e.lessonId === lessonId || e.lessonId === rawId) queueEntries.delete(id)
+          }
+        }
+        json(res, 200, { members: [], ended: true })
+        return true
+      }
+
       let members = []
       if (pool) {
         try {
@@ -357,7 +519,7 @@ export async function handleApiRequest(req, res) {
       return true
     }
     if (req.method === 'GET' && path === '/me/queue') {
-      json(res, 200, { queue: await queueResponse(await queueForUser(user.id)) })
+      json(res, 200, { queue: await queueResponse(await queueForUser(user.id, user.group)) })
       return true
     }
     if (req.method === 'POST' && path.match(/^\/lessons\/[^/]+\/queue\/join$/)) {
@@ -369,13 +531,28 @@ export async function handleApiRequest(req, res) {
         json(res, 404, { message: 'Занятие не найдено.' })
         return true
       }
+      if (isLessonEnded(lesson)) {
+        json(res, 400, { message: 'Эта пара уже завершилась. Запись закрыта.' })
+        return true
+      }
       if (lesson.registrationStatus === 'closed' || lesson.registrationStatus === 'completed') {
         json(res, 409, { message: 'Регистрация закрыта.' })
         return true
       }
-      if (await queueForUser(user.id)) {
-        json(res, 409, { message: 'Вы уже в очереди.' })
-        return true
+
+      const existingQueue = await queueForUser(user.id, user.group)
+      if (existingQueue) {
+        if (existingQueue.lessonId === lessonId || existingQueue.lessonId === rawId) {
+          json(res, 200, { queue: await queueResponse(existingQueue) })
+          return true
+        } else {
+          // If from another lesson, remove old entry
+          if (pool) {
+            await pool.query(`DELETE FROM queue_entries WHERE id = $1`, [existingQueue.id]).catch(() => {})
+          } else {
+            queueEntries.delete(existingQueue.id)
+          }
+        }
       }
       let entry
       if (pool) {
@@ -395,30 +572,43 @@ export async function handleApiRequest(req, res) {
       json(res, 201, { queue: await queueResponse(entry) })
       return true
     }
-    if (req.method === 'DELETE' && path.match(/^\/queues\/[^/]+\/leave$/)) {
-      const rawId = path.split('/')[2]
-      const queueId = decodeURIComponent(rawId)
-      let entry = null
+    // Unified leave queue endpoint for current user (robust, works regardless of route)
+    if (
+      ((req.method === 'DELETE' || req.method === 'POST') && (path === '/me/queue' || path === '/me/queue/leave' || path === '/queues/leave')) ||
+      (req.method === 'DELETE' && path.match(/^\/queues\/[^/]+\/leave$/)) ||
+      ((req.method === 'POST' || req.method === 'DELETE') && path.match(/^\/lessons\/[^/]+\/queue\/leave$/))
+    ) {
       if (pool) {
         try {
-          const resDb = await pool.query(`SELECT id, user_id AS "userId" FROM queue_entries WHERE id = $1`, [queueId])
-          entry = resDb.rows[0]
-          if (entry && entry.userId === user.id) {
-            await pool.query(`DELETE FROM queue_entries WHERE id = $1`, [queueId])
-          }
-        } catch {
-          entry = queueEntries.get(queueId)
-          if (entry && entry.userId === user.id) queueEntries.delete(queueId)
+          await pool.query(`DELETE FROM queue_entries WHERE user_id = $1`, [user.id])
+        } catch (e) {
+          console.error('DB delete queue error:', e)
         }
-      } else {
-        entry = queueEntries.get(queueId)
-        if (entry && entry.userId === user.id) queueEntries.delete(queueId)
       }
-      if (!entry || entry.userId !== user.id) {
-        json(res, 404, { message: 'Очередь не найдена.' })
-        return true
+      for (const [id, entry] of queueEntries.entries()) {
+        if (entry.userId === user.id) queueEntries.delete(id)
       }
-      json(res, 200, { queue: null })
+      json(res, 200, { ok: true, queue: null })
+      return true
+    }
+
+    // Reset queue for a lesson
+    if (req.method === 'POST' && path.match(/^\/lessons\/[^/]+\/queue\/reset$/)) {
+      const rawId = path.split('/')[2]
+      const lessonId = decodeURIComponent(rawId)
+      if (pool) {
+        try {
+          await pool.query(`DELETE FROM queue_entries WHERE lesson_id = $1 OR lesson_id = $2`, [lessonId, rawId])
+        } catch (e) {
+          console.error('DB reset queue error:', e)
+        }
+      }
+      for (const [id, entry] of queueEntries.entries()) {
+        if (entry.lessonId === lessonId || entry.lessonId === rawId) {
+          queueEntries.delete(id)
+        }
+      }
+      json(res, 200, { ok: true, message: 'Очередь сброшена.' })
       return true
     }
     if (req.method === 'GET' && path === '/me/history') {

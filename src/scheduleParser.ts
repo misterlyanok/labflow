@@ -1,38 +1,138 @@
 import type { Lesson, RegistrationStatus } from './types'
 
-const weekdayNames = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
+export const weekdayNames = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
 
-const parseDate = (value: unknown): Date | null => {
-  const text = String(value || '')
+export const parseDate = (value: unknown): Date | null => {
+  const text = String(value || '').trim()
   const ru = text.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+  if (ru) {
+    return new Date(Number(ru[3]), Number(ru[2]) - 1, Number(ru[1]), 12, 0, 0)
+  }
   const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return ru ? new Date(`${ru[3]}-${ru[2]}-${ru[1]}T00:00:00`) : iso ? new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00`) : null
+  if (iso) {
+    return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), 12, 0, 0)
+  }
+  return null
 }
 
-const isoDate = (date: Date): string => date.toISOString().slice(0, 10)
+export const formatYMD = (date: Date): string => {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
 
-function expandWeeklyEntries(entries: any[], weekday: number, termStart: Date | null): any[] {
+export const toStandardDate = (value: unknown): string => {
+  const d = parseDate(value)
+  return d ? formatYMD(d) : ''
+}
+
+export function isLessonEnded(lesson: Lesson | null | undefined): boolean {
+  if (!lesson || !lesson.date) return false
+  const now = new Date()
+  const todayYMD = formatYMD(now)
+
+  if (lesson.date < todayYMD) return true
+  if (lesson.date > todayYMD) return false
+
+  if (!lesson.endTime) return false
+  const [endH, endM] = lesson.endTime.split(':').map(Number)
+  if (isNaN(endH) || isNaN(endM)) return false
+
+  const currentTotal = now.getHours() * 60 + now.getMinutes()
+  const endTotal = endH * 60 + endM
+
+  return currentTotal >= endTotal
+}
+
+export function getWeekNumber(
+  date: Date,
+  termStart: Date | null,
+  currentWeek?: number,
+  todayDate?: Date | null
+): number {
+  if (currentWeek && todayDate) {
+    const dayOfWeekToday = (todayDate.getDay() + 6) % 7 // Monday = 0, Sunday = 6
+    const mondayToday = new Date(todayDate)
+    mondayToday.setDate(mondayToday.getDate() - dayOfWeekToday)
+    mondayToday.setHours(12, 0, 0, 0)
+
+    const dayOfWeekTarget = (date.getDay() + 6) % 7
+    const mondayTarget = new Date(date)
+    mondayTarget.setDate(mondayTarget.getDate() - dayOfWeekTarget)
+    mondayTarget.setHours(12, 0, 0, 0)
+
+    const diffWeeks = Math.round((mondayTarget.getTime() - mondayToday.getTime()) / (7 * 86400000))
+    return ((((currentWeek - 1 + diffWeeks) % 4) + 4) % 4) + 1
+  }
+
+  if (termStart) {
+    const dayOfWeekTerm = (termStart.getDay() + 6) % 7
+    const mondayTerm = new Date(termStart)
+    mondayTerm.setDate(mondayTerm.getDate() - dayOfWeekTerm)
+    mondayTerm.setHours(12, 0, 0, 0)
+
+    const dayOfWeekTarget = (date.getDay() + 6) % 7
+    const mondayTarget = new Date(date)
+    mondayTarget.setDate(mondayTarget.getDate() - dayOfWeekTarget)
+    mondayTarget.setHours(12, 0, 0, 0)
+
+    const diffWeeks = Math.floor((mondayTarget.getTime() - mondayTerm.getTime()) / (7 * 86400000))
+    return (((diffWeeks % 4) + 4) % 4) + 1
+  }
+
+  // Fallback: estimate based on autumn or spring semester start
+  const year = date.getFullYear()
+  const month = date.getMonth()
+  const termStartEstimated = month >= 7 ? new Date(year, 8, 1, 12, 0, 0) : new Date(year, 1, 7, 12, 0, 0)
+  const dayOfWeekEst = (termStartEstimated.getDay() + 6) % 7
+  const mondayEst = new Date(termStartEstimated)
+  mondayEst.setDate(mondayEst.getDate() - dayOfWeekEst)
+  mondayEst.setHours(12, 0, 0, 0)
+
+  const dayOfWeekTarget = (date.getDay() + 6) % 7
+  const mondayTarget = new Date(date)
+  mondayTarget.setDate(mondayTarget.getDate() - dayOfWeekTarget)
+  mondayTarget.setHours(12, 0, 0, 0)
+
+  const diffWeeks = Math.floor((mondayTarget.getTime() - mondayEst.getTime()) / (7 * 86400000))
+  return (((diffWeeks % 4) + 4) % 4) + 1
+}
+
+function expandWeeklyEntries(
+  entries: any[],
+  weekday: number,
+  termStart: Date | null,
+  termEnd: Date | null,
+  currentWeek?: number,
+  todayDate?: Date | null
+): any[] {
   if (!Array.isArray(entries)) return []
   const result: any[] = []
   entries.forEach((item, index) => {
-    const start = parseDate(item.startLessonDate)
-    const end = parseDate(item.endLessonDate)
+    const start = parseDate(item.startLessonDate) || termStart
+    const end = parseDate(item.endLessonDate) || termEnd
     const oneOffDate = parseDate(item.dateLesson)
     const weeks = (Array.isArray(item.weekNumber) ? item.weekNumber : []).map(Number).filter(Boolean)
-    const add = (date: Date) =>
+
+    const add = (date: Date) => {
+      const dStr = formatYMD(date)
       result.push({
         ...item,
-        id: `${item.id || item.lessonId || item.subject || 'lesson'}-${isoDate(date)}-${item.startLessonTime || item.startTime || ''}-${index}`,
-        date: isoDate(date)
+        id: `${item.id || item.lessonId || item.subject || 'lesson'}-${dStr}-${item.startLessonTime || item.startTime || ''}-${index}`,
+        date: dStr
       })
+    }
 
     if (oneOffDate) return add(oneOffDate)
     if (!start || !end || !weeks.length) return
-    const cycleStart = termStart || start
-    for (const date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
-      if (date.getDay() !== weekday) continue
-      const week = (Math.floor((date.getTime() - cycleStart.getTime()) / 86400000 / 7) % 4) + 1
-      if (weeks.includes(week)) add(new Date(date))
+
+    for (const cur = new Date(start); cur <= end; cur.setDate(cur.getDate() + 1)) {
+      if (cur.getDay() !== weekday) continue
+      const week = getWeekNumber(cur, termStart, currentWeek, todayDate)
+      if (weeks.includes(week)) {
+        add(new Date(cur))
+      }
     }
   })
   return result
@@ -43,10 +143,16 @@ export function expandJsonSchedule(payload: any): any[] {
   if (!schedules || Array.isArray(schedules) || typeof schedules !== 'object') {
     return Array.isArray(payload) ? payload : []
   }
-  const termStart = parseDate(payload.startDate)
+  const termStart = parseDate(payload.startDate || payload.dateStart)
+  const termEnd = parseDate(payload.endDate || payload.dateEnd)
+  const currentWeek = Number(payload.currentWeekNumber) || undefined
+  const todayDate = parseDate(payload.todayDate)
+
   const entries = Object.entries(schedules).flatMap(([dayName, lessonsForDay]) => {
     const weekday = weekdayNames.indexOf(dayName.toLowerCase())
-    return weekday > 0 ? expandWeeklyEntries(lessonsForDay as any[], weekday, termStart) : []
+    return weekday > 0
+      ? expandWeeklyEntries(lessonsForDay as any[], weekday, termStart, termEnd, currentWeek, todayDate)
+      : []
   })
   return entries
 }
@@ -64,12 +170,13 @@ export function normalizeLessons(payload: any): Lesson[] {
       )
     : []
 
-  return source
+  const mapped: Lesson[] = source
     .map(({ item, outerDate }, index): Lesson => {
       const subject = String(item.subject || item.subjectName || item.subjectFullName || 'Занятие')
       const subjectId = String(item.subjectId || item.subjectCode || subject.toLowerCase().replace(/[^a-zа-я0-9]+/gi, '-'))
       const title = String(item.title || item.name || item.subjectFullName || item.subject || `Занятие №${index + 1}`)
-      const date = String(item.date || (isDate(item.dateLesson) ? item.dateLesson : '') || outerDate || (isDate(item.startLessonDate) ? item.startLessonDate : ''))
+      const rawDate = String(item.date || (isDate(item.dateLesson) ? item.dateLesson : '') || outerDate || (isDate(item.startLessonDate) ? item.startLessonDate : ''))
+      const date = toStandardDate(rawDate) || rawDate
       const startTime = String(item.startTime || item.start || item.startLessonTime || item.timeFrom || '')
       const endTime = String(item.endTime || item.end || item.endLessonTime || item.timeTo || '')
 
@@ -103,6 +210,15 @@ export function normalizeLessons(payload: any): Lesson[] {
       }
     })
     .filter(item => item.date && item.startTime)
+
+  // CRITICAL: Sort chronologically by date ascending, then startTime ascending
+  mapped.sort((a, b) => {
+    const dateCmp = a.date.localeCompare(b.date)
+    if (dateCmp !== 0) return dateCmp
+    return a.startTime.localeCompare(b.startTime)
+  })
+
+  return mapped
 }
 
 export async function fetchDirectBsuirSchedule(groupNumber: string): Promise<Lesson[]> {

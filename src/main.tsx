@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api, usingRemoteApi } from './api'
+import { isLessonEnded } from './scheduleParser'
 import type { Lesson, Queue, QueueMember, Screen, User } from './types'
 import './styles.css'
 
@@ -10,6 +11,45 @@ const statusCopy: Record<string, string> = {
   called: 'Вас вызывают',
   serving: 'На защите',
   completed: 'Сдал работу'
+}
+
+export function getPrimaryOaipLesson(schedule: Lesson[]): Lesson | null {
+  if (!schedule || !schedule.length) return null
+  const now = new Date()
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+
+  // 1. Upcoming OAIP lab (today or later)
+  const upcomingLab = schedule.find(
+    l =>
+      (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
+      (l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб') &&
+      l.date >= todayStr
+  )
+  if (upcomingLab) return upcomingLab
+
+  // 2. Upcoming any OAIP lesson
+  const upcomingAny = schedule.find(
+    l =>
+      (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
+      l.date >= todayStr
+  )
+  if (upcomingAny) return upcomingAny
+
+  // 3. Fallback: any OAIP lab
+  const anyLab = schedule.find(
+    l =>
+      (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
+      (l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб')
+  )
+  if (anyLab) return anyLab
+
+  // 4. Any OAIP lesson
+  const anyOaip = schedule.find(
+    l => l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')
+  )
+  if (anyOaip) return anyOaip
+
+  return schedule[0] || null
 }
 
 function App() {
@@ -36,25 +76,21 @@ function App() {
       const schedule = await api.getUniversitySchedule(currentUser.group)
       setLessons(schedule)
 
-      // Find the primary OAIP lesson (prefer lab work ЛР)
-      const oaipLabs = schedule.filter(
-        l =>
-          (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
-          (l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб')
-      )
-      const targetOaip =
-        oaipLabs[0] ||
-        schedule.find(l => l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) ||
-        schedule[0]
+      const targetOaip = getPrimaryOaipLesson(schedule)
 
       if (targetOaip) {
         setLesson(targetOaip)
-        const [activeQueue, members] = await Promise.all([
-          api.getQueue(currentUser, targetOaip.id),
-          api.getQueueMembers(targetOaip.id)
-        ])
-        setQueue(activeQueue)
-        setQueueMembers(members)
+        if (isLessonEnded(targetOaip)) {
+          setQueue(null)
+          setQueueMembers([])
+        } else {
+          const [activeQueue, members] = await Promise.all([
+            api.getQueue(currentUser, targetOaip.id),
+            api.getQueueMembers(targetOaip.id)
+          ])
+          setQueue(activeQueue)
+          setQueueMembers(members)
+        }
       }
     } catch (err: any) {
       console.warn('Failed to load schedule:', err)
@@ -75,6 +111,11 @@ function App() {
     if (!user || !user.name || !lesson) return
     const interval = setInterval(async () => {
       try {
+        if (isLessonEnded(lesson)) {
+          setQueue(null)
+          setQueueMembers([])
+          return
+        }
         const [activeQueue, members] = await Promise.all([
           api.getQueue(user, lesson.id),
           api.getQueueMembers(lesson.id)
@@ -191,12 +232,17 @@ function App() {
     setLoading(true)
     try {
       setLesson(currentLesson)
-      const [q, members] = await Promise.all([
-        api.getQueue(user, currentLesson.id),
-        api.getQueueMembers(currentLesson.id)
-      ])
-      setQueue(q)
-      setQueueMembers(members)
+      if (isLessonEnded(currentLesson)) {
+        setQueue(null)
+        setQueueMembers([])
+      } else {
+        const [q, members] = await Promise.all([
+          api.getQueue(user, currentLesson.id),
+          api.getQueueMembers(currentLesson.id)
+        ])
+        setQueue(q)
+        setQueueMembers(members)
+      }
       setScreen('queue')
     } finally {
       setLoading(false)
@@ -207,13 +253,20 @@ function App() {
     if (!user) return
     const currentLesson = lesson || lessons[0]
     if (!currentLesson) return
+    if (isLessonEnded(currentLesson)) {
+      setError('Эта пара уже закончилась. Запись в очередь закрыта.')
+      return
+    }
     setLoading(true)
+    setError('')
     try {
       const q = await api.joinQueue(currentLesson.id, user)
       const members = await api.getQueueMembers(currentLesson.id)
       setQueue(q)
       setQueueMembers(members)
       setScreen('queue')
+    } catch (err: any) {
+      setError(err?.message || 'Не удалось встать в очередь')
     } finally {
       setLoading(false)
     }
@@ -221,17 +274,33 @@ function App() {
 
   const leaveQueue = async () => {
     if (!user) return
-    if (confirm('Покинуть очередь по ОАиП? Вы освободите своё место.')) {
-      setLoading(true)
-      try {
-        const currentLessonId = lesson?.id || ''
-        await api.leaveQueue(user, queue?.id, currentLessonId)
-        setQueue(null)
-        const members = await api.getQueueMembers(currentLessonId)
-        setQueueMembers(members)
-      } finally {
-        setLoading(false)
-      }
+    setLoading(true)
+    setError('')
+    try {
+      const currentLessonId = lesson?.id || ''
+      await api.leaveQueue(user, queue?.id, currentLessonId)
+      setQueue(null)
+      const members = await api.getQueueMembers(currentLessonId)
+      setQueueMembers(members)
+    } catch (err: any) {
+      setError(err?.message || 'Не удалось покинуть очередь')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const resetQueue = async () => {
+    if (!lesson) return
+    setLoading(true)
+    setError('')
+    try {
+      await api.resetQueue(lesson.id)
+      setQueue(null)
+      setQueueMembers([])
+    } catch (err: any) {
+      setError(err?.message || 'Не удалось сбросить очередь')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -270,12 +339,8 @@ function App() {
                 queue={queue}
                 lessons={lessons}
                 onOpenQueue={() => {
-                  const oaip = lessons.find(
-                    l =>
-                      (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
-                      (l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб')
-                  ) || lessons.find(l => l.subject?.toLowerCase().includes('оаип')) || lessons[0]
-                  openQueue(oaip)
+                  const target = getPrimaryOaipLesson(lessons) || lesson
+                  if (target) openQueue(target)
                 }}
                 onOpenLesson={openLesson}
               />
@@ -307,6 +372,7 @@ function App() {
                 members={queueMembers}
                 onJoin={joinQueue}
                 onLeave={leaveQueue}
+                onReset={resetQueue}
                 onRefresh={async () => {
                   if (!lesson) return
                   const [q, mems] = await Promise.all([
@@ -340,12 +406,8 @@ function App() {
         <button
           className={screen === 'queue' ? 'active' : ''}
           onClick={() => {
-            const oaip = lessons.find(
-              l =>
-                (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
-                (l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб')
-            ) || lessons.find(l => l.subject?.toLowerCase().includes('оаип')) || lessons[0]
-            openQueue(oaip)
+            const target = getPrimaryOaipLesson(lessons) || lesson
+            if (target) openQueue(target)
           }}
         >
           ☰<span>Очередь</span>
@@ -386,14 +448,7 @@ function Home({
   onOpenQueue: () => void
   onOpenLesson: (l: Lesson) => void
 }) {
-  const oaipLesson =
-    lessons.find(
-      l =>
-        (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
-        (l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб')
-    ) ||
-    lessons.find(l => l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) ||
-    lessons[0]
+  const oaipLesson = getPrimaryOaipLesson(lessons)
 
   return (
     <>
@@ -461,6 +516,7 @@ function QueueView({
   members,
   onJoin,
   onLeave,
+  onReset,
   onRefresh
 }: {
   queue: Queue | null
@@ -469,12 +525,17 @@ function QueueView({
   members: QueueMember[]
   onJoin: () => void
   onLeave: () => void
+  onReset?: () => void
   onRefresh?: () => void
 }) {
   const [refreshing, setRefreshing] = useState(false)
-  const activeMembers = members.filter(m => m.status !== 'completed')
-  const servingMember = members.find(m => m.status === 'serving')
-  const isUserInQueue = Boolean(queue)
+  const [confirmLeave, setConfirmLeave] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
+
+  const isEnded = isLessonEnded(lesson)
+  const activeMembers = isEnded ? [] : members.filter(m => m.status !== 'completed')
+  const servingMember = isEnded ? null : members.find(m => m.status === 'serving')
+  const isUserInQueue = Boolean(queue && !isEnded)
 
   const handleManualRefresh = async () => {
     if (!onRefresh || refreshing) return
@@ -491,8 +552,20 @@ function QueueView({
       <p className="eyebrow">ЭЛЕКТРОННАЯ ОЧЕРЕДЬ · ОАиП</p>
       <h1>{lesson?.title || 'Лабораторная работа по ОАиП'}</h1>
       <p className="muted">
-        {[lesson?.teacher, lesson?.room, lesson?.date, lesson?.startTime].filter(Boolean).join(' · ')}
+        {[lesson?.teacher, lesson?.room ? `Ауд. ${lesson.room}` : '', lesson?.date, lesson?.startTime && lesson?.endTime ? `${lesson.startTime}–${lesson.endTime}` : lesson?.startTime].filter(Boolean).join(' · ')}
       </p>
+
+      {/* Lesson ended notification banner */}
+      {isEnded && (
+        <div className="banner" style={{ background: '#4d2020', border: '1px solid #ff767566', color: '#ffc5c5', padding: '14px 18px', borderRadius: 20, marginBottom: 16 }}>
+          <div>
+            <b style={{ color: '#fff' }}>⚠️ Занятие завершено</b>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: '#ffd2d2' }}>
+              Пара закончилась в {lesson?.endTime || ''}. Очередь на эту пару закрыта и сброшена.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Summary statistics */}
       <div className="queue-summary-banner">
@@ -526,10 +599,47 @@ function QueueView({
             </span>
           </div>
           <div style={{ marginTop: 20 }}>
-            <button className="secondary" onClick={onLeave}>
-              Покинуть очередь
-            </button>
+            {confirmLeave ? (
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                <button
+                  style={{
+                    background: '#d63031',
+                    color: '#fff',
+                    padding: '10px 18px',
+                    borderRadius: 14,
+                    fontSize: 13,
+                    fontWeight: 800
+                  }}
+                  onClick={async () => {
+                    setConfirmLeave(false)
+                    await onLeave()
+                  }}
+                >
+                  Да, выйти из очереди
+                </button>
+                <button
+                  className="secondary"
+                  style={{ padding: '10px 18px', borderRadius: 14, fontSize: 13 }}
+                  onClick={() => setConfirmLeave(false)}
+                >
+                  Отмена
+                </button>
+              </div>
+            ) : (
+              <button className="secondary" onClick={() => setConfirmLeave(true)}>
+                Покинуть очередь
+              </button>
+            )}
           </div>
+        </div>
+      ) : isEnded ? (
+        <div className="detail-card" style={{ textAlign: 'center', padding: '20px 16px' }}>
+          <p style={{ border: 0, justifyContent: 'center', fontSize: 16, color: '#f1f8ff', fontWeight: 700 }}>
+            Пара завершена
+          </p>
+          <p style={{ border: 0, justifyContent: 'center', marginTop: -8 }}>
+            Время занятия истекло ({lesson?.startTime}–{lesson?.endTime}). Очередь сброшена.
+          </p>
         </div>
       ) : (
         <div className="detail-card" style={{ textAlign: 'center', padding: '20px 16px' }}>
@@ -551,20 +661,60 @@ function QueueView({
           <h2>Студенты в очереди ({activeMembers.length})</h2>
           <span className="muted">Имя и место каждого · автообновление</span>
         </div>
-        {onRefresh && (
-          <button
-            className="secondary"
-            onClick={handleManualRefresh}
-            disabled={refreshing}
-            style={{ padding: '6px 12px', fontSize: 13, borderRadius: 10 }}
-          >
-            {refreshing ? 'Обновление...' : '↻ Обновить'}
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {onRefresh && (
+            <button
+              className="secondary"
+              onClick={handleManualRefresh}
+              disabled={refreshing}
+              style={{ padding: '6px 12px', fontSize: 13, borderRadius: 10 }}
+            >
+              {refreshing ? 'Обновление...' : '↻ Обновить'}
+            </button>
+          )}
+          {onReset && (
+            confirmReset ? (
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  style={{
+                    background: '#d63031',
+                    color: '#fff',
+                    padding: '6px 10px',
+                    fontSize: 12,
+                    borderRadius: 10,
+                    fontWeight: 700
+                  }}
+                  onClick={async () => {
+                    setConfirmReset(false)
+                    await onReset()
+                  }}
+                >
+                  Сбросить
+                </button>
+                <button
+                  className="secondary"
+                  style={{ padding: '6px 8px', fontSize: 12, borderRadius: 10 }}
+                  onClick={() => setConfirmReset(false)}
+                >
+                  ×
+                </button>
+              </div>
+            ) : (
+              <button
+                className="secondary"
+                onClick={() => setConfirmReset(true)}
+                style={{ padding: '6px 10px', fontSize: 13, borderRadius: 10, color: '#ffafc0' }}
+                title="Сбросить очередь лабораторной"
+              >
+                Сброс
+              </button>
+            )
+          )}
+        </div>
       </div>
 
       <div className="queue-members-list">
-        {members.map(member => {
+        {!isEnded && members.map(member => {
           const isCurrent =
             member.isCurrentUser ||
             (user.name && member.name.toLowerCase() === user.name.toLowerCase())
@@ -603,8 +753,10 @@ function QueueView({
           )
         })}
 
-        {members.length === 0 && (
-          <div className="hint">Очередь пуста. Будьте первым, кто запишется!</div>
+        {(isEnded || members.length === 0) && (
+          <div className="hint">
+            {isEnded ? 'Очередь сброшена по окончании пары.' : 'Очередь пуста. Будьте первым, кто запишется!'}
+          </div>
         )}
       </div>
     </>
@@ -683,78 +835,281 @@ function ScheduleView({
   onOpen: (l: Lesson) => void
   onOpenQueue: (l: Lesson) => void
 }) {
-  const [filterOaip, setFilterOaip] = useState(false)
+  const [subjectFilter, setSubjectFilter] = useState<'all' | 'oaip' | 'labs' | 'pz' | 'lk'>('all')
+  const [periodFilter, setPeriodFilter] = useState<'upcoming' | 'week' | 'all'>('upcoming')
+  const [searchQuery, setSearchQuery] = useState('')
 
-  const filtered = filterOaip
-    ? lessons.filter(l => l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип'))
-    : lessons
+  const now = new Date()
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+
+  // Week boundaries (Monday to Sunday)
+  const dayOfWeek = (now.getDay() + 6) % 7 // Monday = 0
+  const monday = new Date(now)
+  monday.setDate(monday.getDate() - dayOfWeek)
+  const mondayStr = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`
+
+  const sunday = new Date(monday)
+  sunday.setDate(sunday.getDate() + 6)
+  const sundayStr = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`
+
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
+
+  // 1. Filter by subject and search query
+  let filtered = lessons.filter(l => {
+    const isOaip = l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')
+    const isLab = l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб'
+    const isPz = l.lessonTypeAbbrev === 'ПЗ'
+    const isLk = l.lessonTypeAbbrev === 'ЛК'
+
+    if (subjectFilter === 'oaip' && !isOaip) return false
+    if (subjectFilter === 'labs' && !isLab) return false
+    if (subjectFilter === 'pz' && !isPz) return false
+    if (subjectFilter === 'lk' && !isLk) return false
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      const match =
+        (l.subject && l.subject.toLowerCase().includes(q)) ||
+        (l.title && l.title.toLowerCase().includes(q)) ||
+        (l.teacher && l.teacher.toLowerCase().includes(q)) ||
+        (l.room && l.room.toLowerCase().includes(q))
+      if (!match) return false
+    }
+
+    return true
+  })
+
+  // 2. Filter by period
+  if (periodFilter === 'upcoming') {
+    const upcoming = filtered.filter(l => l.date >= todayStr)
+    if (upcoming.length > 0) {
+      filtered = upcoming
+    }
+  } else if (periodFilter === 'week') {
+    const onWeek = filtered.filter(l => l.date >= mondayStr && l.date <= sundayStr)
+    if (onWeek.length > 0) {
+      filtered = onWeek
+    }
+  }
+
+  // 3. Group chronologically by date
+  const dayGroupsMap = new Map<string, Lesson[]>()
+  filtered.forEach(l => {
+    const list = dayGroupsMap.get(l.date) || []
+    list.push(l)
+    dayGroupsMap.set(l.date, list)
+  })
+
+  const sortedDates = Array.from(dayGroupsMap.keys()).sort((a, b) => a.localeCompare(b))
+
+  const russianMonths = [
+    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+  ]
+  const russianWeekdays = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
+
+  const getDayInfo = (dateStr: string) => {
+    const parts = dateStr.split('-')
+    if (parts.length === 3) {
+      const y = Number(parts[0])
+      const m = Number(parts[1]) - 1
+      const d = Number(parts[2])
+      const dt = new Date(y, m, d, 12, 0, 0)
+      const weekday = russianWeekdays[dt.getDay()]
+      const displayDate = `${d} ${russianMonths[m]}`
+      return { weekday, displayDate }
+    }
+    return { weekday: 'День', displayDate: dateStr }
+  }
+
+  const getLessonTypeClass = (abbrev?: string) => {
+    if (!abbrev) return 'default'
+    const clean = abbrev.toUpperCase()
+    if (clean === 'ЛР' || clean === 'ЛАБ') return 'lr'
+    if (clean === 'ПЗ') return 'pz'
+    if (clean === 'ЛК') return 'lk'
+    return 'default'
+  }
 
   return (
     <>
       <p className="eyebrow">РАСПИСАНИЕ ЗАНЯТИЙ</p>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Расписание группы</h1>
-        <button
-          className={filterOaip ? '' : 'secondary'}
-          style={{ padding: '6px 14px', fontSize: 13, borderRadius: 12 }}
-          onClick={() => setFilterOaip(!filterOaip)}
-        >
-          {filterOaip ? 'Все предметы' : 'Только ОАиП'}
-        </button>
-      </div>
+      <h1>Расписание группы</h1>
       <p className="muted">
-        Расписание получено из университетского API BSUIR ({lessons.length} занятий)
+        Упорядочено по дням и времени пар · Всего {lessons.length} занятий
       </p>
 
-      <div className="list">
-        {filtered.slice(0, 50).map(l => {
-          const isOaip = l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')
+      <div className="schedule-controls">
+        <input
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Поиск по предмету, преподавателю, аудитории..."
+          style={{
+            padding: '12px 16px',
+            borderRadius: 14,
+            background: '#071a3a',
+            border: '1px solid #3b628b',
+            color: '#e7f4ff',
+            fontSize: 13,
+            outline: 'none',
+            width: '100%'
+          }}
+        />
+
+        <div className="schedule-filters-row">
+          <button
+            className={`schedule-filter-btn ${periodFilter === 'upcoming' ? '' : 'secondary'}`}
+            onClick={() => setPeriodFilter('upcoming')}
+          >
+            Ближайшие дни
+          </button>
+          <button
+            className={`schedule-filter-btn ${periodFilter === 'week' ? '' : 'secondary'}`}
+            onClick={() => setPeriodFilter('week')}
+          >
+            Текущая неделя
+          </button>
+          <button
+            className={`schedule-filter-btn ${periodFilter === 'all' ? '' : 'secondary'}`}
+            onClick={() => setPeriodFilter('all')}
+          >
+            Все дни семестра
+          </button>
+        </div>
+
+        <div className="schedule-filters-row">
+          <button
+            className={`schedule-filter-btn ${subjectFilter === 'all' ? '' : 'secondary'}`}
+            onClick={() => setSubjectFilter('all')}
+          >
+            Все предметы
+          </button>
+          <button
+            className={`schedule-filter-btn ${subjectFilter === 'oaip' ? '' : 'secondary'}`}
+            onClick={() => setSubjectFilter('oaip')}
+          >
+            ОАиП
+          </button>
+          <button
+            className={`schedule-filter-btn ${subjectFilter === 'labs' ? '' : 'secondary'}`}
+            onClick={() => setSubjectFilter('labs')}
+          >
+            Лабораторные (ЛР)
+          </button>
+          <button
+            className={`schedule-filter-btn ${subjectFilter === 'pz' ? '' : 'secondary'}`}
+            onClick={() => setSubjectFilter('pz')}
+          >
+            Практика (ПЗ)
+          </button>
+          <button
+            className={`schedule-filter-btn ${subjectFilter === 'lk' ? '' : 'secondary'}`}
+            onClick={() => setSubjectFilter('lk')}
+          >
+            Лекции (ЛК)
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 18 }}>
+        {sortedDates.map(dateStr => {
+          const dayLessons = dayGroupsMap.get(dateStr) || []
+          const { weekday, displayDate } = getDayInfo(dateStr)
+          const isToday = dateStr === todayStr
+          const isTomorrow = dateStr === tomorrowStr
+
           return (
             <div
-              key={l.id}
-              className={`list-card ${isOaip ? 'lab-highlight' : ''}`}
-              style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+              key={dateStr}
+              className={`schedule-day-group ${isToday ? 'is-today-group' : ''}`}
             >
-              <div
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', cursor: 'pointer' }}
-                onClick={() => onOpen(l)}
-              >
-                <div>
-                  <b>{l.subject || 'Занятие'}</b>
-                  <small style={{ color: '#d2ebff' }}>{l.title}</small>
-                  {l.teacher && <small style={{ color: '#88afce', marginTop: 3 }}>{l.teacher}</small>}
-                  {l.room && <small style={{ color: '#6693b8' }}>Аудитория: {l.room}</small>}
-                  <em className="lesson-kind">{l.lessonTypeAbbrev || 'Занятие'}</em>
+              <div className="schedule-day-header">
+                <div className="schedule-day-title-wrap">
+                  <span className="schedule-day-name">{weekday}</span>
+                  <span className="schedule-day-date">{displayDate}</span>
                 </div>
-                <time style={{ textAlign: 'right', minWidth: 80 }}>
-                  <span style={{ fontSize: 13, color: '#92b7d8' }}>{l.date}</span>
-                  <b style={{ display: 'block', fontSize: 17, color: '#7ee8ff' }}>{l.startTime}</b>
-                </time>
+                <div className="schedule-day-badges">
+                  {isToday && <span className="day-badge today">Сегодня</span>}
+                  {isTomorrow && <span className="day-badge tomorrow">Завтра</span>}
+                  <span className="day-badge count">
+                    {dayLessons.length} {dayLessons.length === 1 ? 'пара' : dayLessons.length < 5 ? 'пары' : 'пар'}
+                  </span>
+                </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 8, width: '100%', borderTop: '1px solid #3c6e9a44', paddingTop: 10 }}>
-                {isOaip && (
-                  <button
-                    style={{ flex: 1, padding: '8px 12px', fontSize: 13, borderRadius: 10 }}
-                    onClick={() => onOpenQueue(l)}
-                  >
-                    Очередь
-                  </button>
-                )}
-                <button
-                  className="secondary"
-                  style={{ flex: 1, padding: '8px 12px', fontSize: 13, borderRadius: 10 }}
-                  onClick={() => onOpen(l)}
-                >
-                  Подробнее
-                </button>
+              <div className="schedule-day-lessons">
+                {dayLessons.map(l => {
+                  const isOaip = l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')
+                  const typeClass = getLessonTypeClass(l.lessonTypeAbbrev)
+
+                  return (
+                    <div
+                      key={l.id}
+                      className={`schedule-lesson-row ${isOaip ? 'is-oaip-row' : ''}`}
+                    >
+                      <div
+                        className="schedule-lesson-left"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => onOpen(l)}
+                      >
+                        <div className="schedule-time-box">
+                          <span className="schedule-time-start">{l.startTime}</span>
+                          {l.endTime && <span className="schedule-time-end">{l.endTime}</span>}
+                        </div>
+
+                        <div className="schedule-lesson-info">
+                          <div className="schedule-lesson-subject-row">
+                            <span className="schedule-lesson-subject">{l.subject || 'Занятие'}</span>
+                            <span className={`lesson-type-pill ${typeClass}`}>
+                              {l.lessonTypeAbbrev || 'Занятие'}
+                            </span>
+                          </div>
+
+                          {l.title && l.title !== l.subject && (
+                            <span className="schedule-lesson-title">{l.title}</span>
+                          )}
+
+                          <span className="schedule-lesson-meta">
+                            {[l.teacher, l.room ? `Ауд. ${l.room}` : ''].filter(Boolean).join(' · ')}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="schedule-lesson-actions">
+                        {isOaip && (
+                          <button
+                            className="schedule-btn-queue"
+                            onClick={() => onOpenQueue(l)}
+                          >
+                            Очередь
+                          </button>
+                        )}
+                        <button
+                          className="secondary schedule-btn-info"
+                          onClick={() => onOpen(l)}
+                        >
+                          Инфо
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )
         })}
 
-        {filtered.length === 0 && (
-          <div className="hint">Занятий не найдено.</div>
+        {sortedDates.length === 0 && (
+          <div className="hint" style={{ textAlign: 'center', padding: '30px 20px' }}>
+            <p style={{ fontWeight: 700, fontSize: 16, color: '#f1f8ff', margin: '0 0 6px' }}>
+              Занятий не найдено
+            </p>
+            <p style={{ margin: 0, fontSize: 13, color: '#92b5d6' }}>
+              Попробуйте выбрать другой фильтр или переключить на «Все дни семестра»
+            </p>
+          </div>
         )}
       </div>
     </>
