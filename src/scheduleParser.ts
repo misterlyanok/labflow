@@ -45,6 +45,27 @@ export function isLessonEnded(lesson: Lesson | null | undefined): boolean {
   return currentTotal >= endTotal
 }
 
+export function extractSubgroup(item: any): number {
+  if (!item || typeof item !== 'object') return 0
+  const raw = Number(item.numSubgroup ?? item.subgroup ?? item.subGroup ?? 0)
+  if (raw === 1 || raw === 2) return raw
+
+  const text = `${item.note || ''} ${item.title || ''}`
+  if (/(?:^|\s|[,;(])1(?:\s*-?я)?\s*(?:подгрупп|п\/г|пг)/i.test(text) || /(?:подгрупп[аы]?|п\/г)\s*№?\s*1\b/i.test(text)) {
+    return 1
+  }
+  if (/(?:^|\s|[,;(])2(?:\s*-?я)?\s*(?:подгрупп|п\/г|пг)/i.test(text) || /(?:подгрупп[аы]?|п\/г)\s*№?\s*2\b/i.test(text)) {
+    return 2
+  }
+  return 0
+}
+
+export function isLessonForSubgroup(lesson: Lesson, userSubgroup?: 1 | 2): boolean {
+  if (!userSubgroup) return true
+  if (!lesson.subgroup || lesson.subgroup === 0) return true
+  return lesson.subgroup === userSubgroup
+}
+
 export function getWeekNumber(
   date: Date,
   termStart: Date | null,
@@ -115,11 +136,13 @@ function expandWeeklyEntries(
     const oneOffDate = parseDate(item.dateLesson)
     const weeks = (Array.isArray(item.weekNumber) ? item.weekNumber : []).map(Number).filter(Boolean)
 
+    const sub = extractSubgroup(item)
     const add = (date: Date) => {
       const dStr = formatYMD(date)
       result.push({
         ...item,
-        id: `${item.id || item.lessonId || item.subject || 'lesson'}-${dStr}-${item.startLessonTime || item.startTime || ''}-${index}`,
+        numSubgroup: sub,
+        id: `${item.id || item.lessonId || item.subject || 'lesson'}-${dStr}-${item.startLessonTime || item.startTime || ''}-sg${sub}-${index}`,
         date: dStr
       })
     }
@@ -192,6 +215,7 @@ export function normalizeLessons(payload: any): Lesson[] {
       }
 
       const lessonTypeAbbrev: string | undefined = item.lessonTypeAbbrev || undefined
+      const subgroup = extractSubgroup(item)
       const registration: RegistrationStatus = (item.registration || item.registrationStatus || 'open') as RegistrationStatus
 
       return {
@@ -206,16 +230,19 @@ export function normalizeLessons(payload: any): Lesson[] {
         room,
         note: item.note || undefined,
         lessonTypeAbbrev,
+        subgroup,
         registration
       }
     })
     .filter(item => item.date && item.startTime)
 
-  // CRITICAL: Sort chronologically by date ascending, then startTime ascending
+  // CRITICAL: Sort chronologically by date ascending, then startTime ascending, then subgroup
   mapped.sort((a, b) => {
     const dateCmp = a.date.localeCompare(b.date)
     if (dateCmp !== 0) return dateCmp
-    return a.startTime.localeCompare(b.startTime)
+    const timeCmp = a.startTime.localeCompare(b.startTime)
+    if (timeCmp !== 0) return timeCmp
+    return (a.subgroup || 0) - (b.subgroup || 0)
   })
 
   return mapped

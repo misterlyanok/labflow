@@ -28,9 +28,11 @@ async function initDatabase() {
         telegram_id TEXT UNIQUE,
         name TEXT NOT NULL DEFAULT '',
         group_number TEXT NOT NULL,
+        subgroup INTEGER NOT NULL DEFAULT 1,
         notifications BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS subgroup INTEGER NOT NULL DEFAULT 1;
       CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -71,6 +73,16 @@ const lessons = [
   }
 ]
 
+function extractSubgroup(item) {
+  if (!item || typeof item !== 'object') return 0
+  const raw = Number(item.numSubgroup ?? item.subgroup ?? item.subGroup ?? 0)
+  if (raw === 1 || raw === 2) return raw
+  const text = `${item.note || ''} ${item.title || ''}`
+  if (/(?:^|\s|[,;(])1(?:\s*-?я)?\s*(?:подгрупп|п\/г|пг)/i.test(text) || /(?:подгрупп[аы]?|п\/г)\s*№?\s*1\b/i.test(text)) return 1
+  if (/(?:^|\s|[,;(])2(?:\s*-?я)?\s*(?:подгрупп|п\/г|пг)/i.test(text) || /(?:подгрупп[аы]?|п\/г)\s*№?\s*2\b/i.test(text)) return 2
+  return 0
+}
+
 function normalizeLessons(payload) {
   const candidate = Array.isArray(payload) ? payload : payload?.lessons || payload?.schedule || payload?.schedules || payload?.data || payload?.items || payload
   const isDate = value => typeof value === 'string' && (/^\d{4}-\d{2}-\d{2}/.test(value) || /^\d{2}\.\d{2}\.\d{4}$/.test(value))
@@ -101,16 +113,19 @@ function normalizeLessons(payload) {
       room: item.room || item.classroom || (Array.isArray(item.auditories) ? item.auditories[0] : undefined),
       note: item.note || undefined,
       lessonTypeAbbrev: item.lessonTypeAbbrev || undefined,
+      subgroup: extractSubgroup(item),
       registrationStatus: item.registrationStatus || item.registration || 'open',
       registration: item.registration || item.registrationStatus || 'open'
     }
   }).filter(item => item.date && item.startTime)
 
-  // Sort chronologically by date ascending, then startTime ascending
+  // Sort chronologically by date ascending, then startTime ascending, then subgroup
   return mapped.sort((a, b) => {
     const d = a.date.localeCompare(b.date)
     if (d !== 0) return d
-    return a.startTime.localeCompare(b.startTime)
+    const t = a.startTime.localeCompare(b.startTime)
+    if (t !== 0) return t
+    return (a.subgroup || 0) - (b.subgroup || 0)
   })
 }
 
@@ -212,11 +227,13 @@ function expandWeeklyEntries(entries, weekday, termStart, termEnd, currentWeek, 
     const end = parseDate(item.endLessonDate) || termEnd
     const oneOffDate = parseDate(item.dateLesson)
     const weeks = (Array.isArray(item.weekNumber) ? item.weekNumber : []).map(Number).filter(Boolean)
+    const sub = extractSubgroup(item)
     const add = date => {
       const dStr = formatYMD(date)
       result.push({
         ...item,
-        id: `${item.id || item.lessonId || item.subject || 'lesson'}-${dStr}-${item.startLessonTime || item.startTime || ''}-${index}`,
+        numSubgroup: sub,
+        id: `${item.id || item.lessonId || item.subject || 'lesson'}-${dStr}-${item.startLessonTime || item.startTime || ''}-sg${sub}-${index}`,
         date: dStr
       })
     }
@@ -264,6 +281,7 @@ function expandXmlSchedule(xml) {
     const subjectFullName = xmlValue(block, 'subjectFullName')
     const weekNumbers = xmlValues(block, 'weekNumber').map(Number).filter(Boolean)
     const dateLesson = parseDate(xmlValue(block, 'dateLesson'))
+    const numSubgroup = Number(xmlValue(block, 'numSubgroup')) || 0
     const base = {
       subject,
       subjectFullName,
@@ -271,12 +289,13 @@ function expandXmlSchedule(xml) {
       startLessonTime: xmlValue(block, 'startLessonTime'),
       endLessonTime: xmlValue(block, 'endLessonTime'),
       lessonTypeAbbrev: xmlValue(block, 'lessonTypeAbbrev'),
+      numSubgroup,
       note: xmlValue(block, 'note'),
       room: xmlValues(block, 'auditories')[0] || ''
     }
     const addLesson = date => {
       const dStr = formatYMD(date)
-      result.push({ ...base, date: dStr, id: `${subject}-${dStr}-${base.startLessonTime}` })
+      result.push({ ...base, date: dStr, id: `${subject}-${dStr}-${base.startLessonTime}-sg${numSubgroup}` })
     }
     if (dateLesson) addLesson(dateLesson)
     else if (start && end && weekNumbers.length) {
@@ -330,7 +349,7 @@ async function userFromRequest(req) {
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (pool) {
     if (!token) return null
-    const result = await pool.query(`SELECT u.id, u.telegram_id AS "telegramId", u.name, u.group_number AS "group", u.notifications FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1`, [token])
+    const result = await pool.query(`SELECT u.id, u.telegram_id AS "telegramId", u.name, u.group_number AS "group", COALESCE(u.subgroup, 1) AS "subgroup", u.notifications FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1`, [token])
     return result.rows[0] || null
   }
   const userId = sessions.get(token)
@@ -392,14 +411,15 @@ export async function handleApiRequest(req, res) {
     }
 
     if (req.method === 'POST' && path === '/auth/login') {
-      const { group, password, name } = await body(req)
+      const { group, password, name, subgroup } = await body(req)
       const cleanGroup = String(group || '').trim() || '668204'
       const cleanName = String(name || '').trim()
-      const user = { id: randomUUID(), telegramId: null, name: cleanName, group: cleanGroup, notifications: true }
+      const cleanSubgroup = Number(subgroup) === 2 ? 2 : 1
+      const user = { id: randomUUID(), telegramId: null, name: cleanName, group: cleanGroup, subgroup: cleanSubgroup, notifications: true }
       const token = randomUUID()
       if (pool) {
         try {
-          await pool.query(`INSERT INTO users (id, telegram_id, name, group_number, notifications) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`, [user.id, user.telegramId, user.name, user.group, user.notifications])
+          await pool.query(`INSERT INTO users (id, telegram_id, name, group_number, subgroup, notifications) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING`, [user.id, user.telegramId, user.name, user.group, user.subgroup, user.notifications])
           await pool.query(`INSERT INTO sessions (token, user_id) VALUES ($1, $2)`, [token, user.id])
         } catch {
           users.set(user.id, user)
@@ -427,9 +447,10 @@ export async function handleApiRequest(req, res) {
       const data = await body(req)
       if (typeof data.name === 'string' && data.name.trim()) user.name = data.name.trim()
       if (typeof data.notifications === 'boolean') user.notifications = data.notifications
+      if (Number(data.subgroup) === 1 || Number(data.subgroup) === 2) user.subgroup = Number(data.subgroup)
       if (pool) {
         try {
-          await pool.query(`UPDATE users SET name = $1, notifications = $2 WHERE id = $3`, [user.name, user.notifications, user.id])
+          await pool.query(`UPDATE users SET name = $1, notifications = $2, subgroup = $3 WHERE id = $4`, [user.name, user.notifications, user.subgroup || 1, user.id])
         } catch {
           users.set(user.id, user)
         }

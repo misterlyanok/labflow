@@ -410,4 +410,79 @@
   border-radius: 10px !important;
 }
 
+.lesson-subgroup-pill {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+  background: #173a61;
+  color: #8ee5ff;
+  border: 1px solid #5ee0ff55;
+}
+
+.lesson-subgroup-pill.sg-2 {
+  background: #2f285c;
+  color: #d4bfff;
+  border: 1px solid #b388ff55;
+}
+
+.subgroup-switch-card {
+  background: linear-gradient(145deg, #10325fcc, #0b2449cc);
+  border: 1px solid #4c84b244;
+  border-radius: 20px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.subgroup-switch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.subgroup-switch-header b {
+  font-size: 15px;
+  color: #f1f8ff;
+}
+
+.subgroup-switch-header small {
+  display: block;
+  font-size: 12px;
+  color: #8eb2d5;
+  margin-top: 2px;
+}
+
+.subgroup-segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  background: #071936;
+  padding: 5px;
+  border-radius: 14px;
+  border: 1px solid #355e8866;
+}
+
+.subgroup-seg-btn {
+  padding: 10px 14px !important;
+  border-radius: 10px !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  background: transparent !important;
+  color: #8eb4d8 !important;
+  box-shadow: none !important;
+  border: 1px solid transparent !important;
+  transition: all 0.15s ease;
+}
+
+.subgroup-seg-btn.active {
+  background: linear-gradient(135deg, #60e0ff, #20b8e7) !important;
+  color: #03142f !important;
+  box-shadow: 0 4px 14px #21bde833 !important;
+}
+
+
 

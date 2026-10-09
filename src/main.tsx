@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api, usingRemoteApi } from './api'
-import { isLessonEnded } from './scheduleParser'
+import { isLessonEnded, isLessonForSubgroup } from './scheduleParser'
 import type { Lesson, Queue, QueueMember, Screen, User } from './types'
 import './styles.css'
 
@@ -13,13 +13,16 @@ const statusCopy: Record<string, string> = {
   completed: 'Сдал работу'
 }
 
-export function getPrimaryOaipLesson(schedule: Lesson[]): Lesson | null {
+export function getPrimaryOaipLesson(schedule: Lesson[], userSubgroup?: 1 | 2): Lesson | null {
   if (!schedule || !schedule.length) return null
   const now = new Date()
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 
+  const filtered = userSubgroup ? schedule.filter(l => isLessonForSubgroup(l, userSubgroup)) : schedule
+  const pool = filtered.length > 0 ? filtered : schedule
+
   // 1. Upcoming OAIP lab (today or later)
-  const upcomingLab = schedule.find(
+  const upcomingLab = pool.find(
     l =>
       (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
       (l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб') &&
@@ -28,7 +31,7 @@ export function getPrimaryOaipLesson(schedule: Lesson[]): Lesson | null {
   if (upcomingLab) return upcomingLab
 
   // 2. Upcoming any OAIP lesson
-  const upcomingAny = schedule.find(
+  const upcomingAny = pool.find(
     l =>
       (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
       l.date >= todayStr
@@ -36,7 +39,7 @@ export function getPrimaryOaipLesson(schedule: Lesson[]): Lesson | null {
   if (upcomingAny) return upcomingAny
 
   // 3. Fallback: any OAIP lab
-  const anyLab = schedule.find(
+  const anyLab = pool.find(
     l =>
       (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
       (l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб')
@@ -44,12 +47,12 @@ export function getPrimaryOaipLesson(schedule: Lesson[]): Lesson | null {
   if (anyLab) return anyLab
 
   // 4. Any OAIP lesson
-  const anyOaip = schedule.find(
+  const anyOaip = pool.find(
     l => l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')
   )
   if (anyOaip) return anyOaip
 
-  return schedule[0] || null
+  return pool[0] || null
 }
 
 function App() {
@@ -76,7 +79,7 @@ function App() {
       const schedule = await api.getUniversitySchedule(currentUser.group)
       setLessons(schedule)
 
-      const targetOaip = getPrimaryOaipLesson(schedule)
+      const targetOaip = getPrimaryOaipLesson(schedule, currentUser.subgroup || 1)
 
       if (targetOaip) {
         setLesson(targetOaip)
@@ -304,6 +307,29 @@ function App() {
     }
   }
 
+  const handleSubgroupChange = async (sg: 1 | 2) => {
+    if (!user) return
+    const updated = await api.setSubgroup(user, sg)
+    setUser(updated)
+    const targetOaip = getPrimaryOaipLesson(lessons, sg)
+    if (targetOaip) {
+      setLesson(targetOaip)
+      if (isLessonEnded(targetOaip)) {
+        setQueue(null)
+        setQueueMembers([])
+      } else {
+        try {
+          const [activeQueue, members] = await Promise.all([
+            api.getQueue(updated, targetOaip.id),
+            api.getQueueMembers(targetOaip.id)
+          ])
+          setQueue(activeQueue)
+          setQueueMembers(members)
+        } catch {}
+      }
+    }
+  }
+
   return (
     <div className="app">
       <header>
@@ -339,7 +365,7 @@ function App() {
                 queue={queue}
                 lessons={lessons}
                 onOpenQueue={() => {
-                  const target = getPrimaryOaipLesson(lessons) || lesson
+                  const target = getPrimaryOaipLesson(lessons, user.subgroup || 1) || lesson
                   if (target) openQueue(target)
                 }}
                 onOpenLesson={openLesson}
@@ -349,6 +375,7 @@ function App() {
             {screen === 'schedule' && (
               <ScheduleView
                 lessons={lessons}
+                userSubgroup={user.subgroup || 1}
                 onOpen={openLesson}
                 onOpenQueue={openQueue}
               />
@@ -388,6 +415,7 @@ function App() {
             {screen === 'profile' && (
               <Profile
                 user={user}
+                onChangeSubgroup={handleSubgroupChange}
                 onToggle={async () => setUser(await api.toggleNotifications(user))}
                 onHistory={() => setScreen('history')}
                 onLogout={handleLogout}
@@ -406,7 +434,7 @@ function App() {
         <button
           className={screen === 'queue' ? 'active' : ''}
           onClick={() => {
-            const target = getPrimaryOaipLesson(lessons) || lesson
+            const target = getPrimaryOaipLesson(lessons, user.subgroup || 1) || lesson
             if (target) openQueue(target)
           }}
         >
@@ -448,14 +476,16 @@ function Home({
   onOpenQueue: () => void
   onOpenLesson: (l: Lesson) => void
 }) {
-  const oaipLesson = getPrimaryOaipLesson(lessons)
+  const oaipLesson = getPrimaryOaipLesson(lessons, user.subgroup || 1)
 
   return (
     <>
       <section className="hero">
         <p className="eyebrow">ПРЕДМЕТ ОАиП</p>
         <h1>Привет, {user.name} 👋</h1>
-        <p className="muted">Группа: {user.group} · Основы алгоритмизации и программирования</p>
+        <p className="muted">
+          Группа: {user.group} · Подгруппа {user.subgroup || 1} · Основы алгоритмизации и программирования
+        </p>
       </section>
 
       {queue ? (
@@ -484,7 +514,7 @@ function Home({
 
       <div className="section-title">
         <h2>Ближайшая лабораторная</h2>
-        <span className="muted">ОАиП</span>
+        <span className="muted">ОАиП · {user.subgroup || 1} подгруппа</span>
       </div>
 
       {oaipLesson ? (
@@ -494,7 +524,10 @@ function Home({
             <p>{oaipLesson.title}</p>
             {oaipLesson.teacher && <small style={{ color: '#8ec8ee' }}>{oaipLesson.teacher}</small>}
             {oaipLesson.room && <small style={{ color: '#68a1c9', display: 'block' }}>Аудитория: {oaipLesson.room}</small>}
-            <em className="lesson-kind">{oaipLesson.lessonTypeAbbrev || 'Лабораторная'}</em>
+            <em className="lesson-kind">
+              {oaipLesson.lessonTypeAbbrev || 'Лабораторная'}
+              {oaipLesson.subgroup === 1 || oaipLesson.subgroup === 2 ? ` · ${oaipLesson.subgroup} подгруппа` : ''}
+            </em>
           </div>
           <time>
             {oaipLesson.date}
@@ -552,7 +585,13 @@ function QueueView({
       <p className="eyebrow">ЭЛЕКТРОННАЯ ОЧЕРЕДЬ · ОАиП</p>
       <h1>{lesson?.title || 'Лабораторная работа по ОАиП'}</h1>
       <p className="muted">
-        {[lesson?.teacher, lesson?.room ? `Ауд. ${lesson.room}` : '', lesson?.date, lesson?.startTime && lesson?.endTime ? `${lesson.startTime}–${lesson.endTime}` : lesson?.startTime].filter(Boolean).join(' · ')}
+        {[
+          lesson?.subgroup === 1 || lesson?.subgroup === 2 ? `${lesson.subgroup} подгруппа` : '',
+          lesson?.teacher,
+          lesson?.room ? `Ауд. ${lesson.room}` : '',
+          lesson?.date,
+          lesson?.startTime && lesson?.endTime ? `${lesson.startTime}–${lesson.endTime}` : lesson?.startTime
+        ].filter(Boolean).join(' · ')}
       </p>
 
       {/* Lesson ended notification banner */}
@@ -804,6 +843,9 @@ function LessonDetails({
           Тип занятия <b>{lesson.lessonTypeAbbrev || 'Лабораторная'}</b>
         </p>
         <p>
+          Подгруппа <b>{lesson.subgroup === 1 || lesson.subgroup === 2 ? `${lesson.subgroup} подгруппа` : 'Общая (вся группа)'}</b>
+        </p>
+        <p>
           Студентов в очереди <b>{activeCount} чел.</b>
         </p>
         {lesson.note && (
@@ -828,10 +870,12 @@ function LessonDetails({
 
 function ScheduleView({
   lessons,
+  userSubgroup,
   onOpen,
   onOpenQueue
 }: {
   lessons: Lesson[]
+  userSubgroup: 1 | 2
   onOpen: (l: Lesson) => void
   onOpenQueue: (l: Lesson) => void
 }) {
@@ -856,8 +900,11 @@ function ScheduleView({
   tomorrow.setDate(tomorrow.getDate() + 1)
   const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
 
+  // 0. Filter by user's selected subgroup (shows common lessons + user's subgroup)
+  const subgroupLessons = lessons.filter(l => isLessonForSubgroup(l, userSubgroup))
+
   // 1. Filter by subject and search query
-  let filtered = lessons.filter(l => {
+  let filtered = subgroupLessons.filter(l => {
     const isOaip = l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')
     const isLab = l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб'
     const isPz = l.lessonTypeAbbrev === 'ПЗ'
@@ -935,10 +982,10 @@ function ScheduleView({
 
   return (
     <>
-      <p className="eyebrow">РАСПИСАНИЕ ЗАНЯТИЙ</p>
+      <p className="eyebrow">РАСПИСАНИЕ ЗАНЯТИЙ · {userSubgroup} ПОДГРУППА</p>
       <h1>Расписание группы</h1>
       <p className="muted">
-        Упорядочено по дням и времени пар · Всего {lessons.length} занятий
+        Только занятия для {userSubgroup}-й подгруппы и общие пары · Всего {subgroupLessons.length} занятий
       </p>
 
       <div className="schedule-controls">
@@ -1065,6 +1112,11 @@ function ScheduleView({
                             <span className={`lesson-type-pill ${typeClass}`}>
                               {l.lessonTypeAbbrev || 'Занятие'}
                             </span>
+                            {(l.subgroup === 1 || l.subgroup === 2) && (
+                              <span className={`lesson-subgroup-pill sg-${l.subgroup}`}>
+                                {l.subgroup} подгруппа
+                              </span>
+                            )}
                           </div>
 
                           {l.title && l.title !== l.subject && (
@@ -1118,15 +1170,19 @@ function ScheduleView({
 
 function Profile({
   user,
+  onChangeSubgroup,
   onToggle,
   onHistory,
   onLogout
 }: {
   user: User
+  onChangeSubgroup: (sg: 1 | 2) => void
   onToggle: () => void
   onHistory: () => void
   onLogout: () => void
 }) {
+  const currentSubgroup = user.subgroup === 2 ? 2 : 1
+
   return (
     <>
       <p className="eyebrow">ЛИЧНЫЙ КАБИНЕТ</p>
@@ -1139,8 +1195,36 @@ function Profile({
           Студенческая группа <b>{user.group}</b>
         </p>
         <p>
+          Подгруппа <b>{currentSubgroup} подгруппа</b>
+        </p>
+        <p>
           Предмет <b>ОАиП</b>
         </p>
+      </div>
+
+      <div className="subgroup-switch-card">
+        <div className="subgroup-switch-header">
+          <div>
+            <b>Выбор подгруппы</b>
+            <small>Показывать в расписании и очереди только занятия вашей подгруппы</small>
+          </div>
+        </div>
+        <div className="subgroup-segmented">
+          <button
+            type="button"
+            className={`subgroup-seg-btn ${currentSubgroup === 1 ? 'active' : ''}`}
+            onClick={() => onChangeSubgroup(1)}
+          >
+            1 подгруппа
+          </button>
+          <button
+            type="button"
+            className={`subgroup-seg-btn ${currentSubgroup === 2 ? 'active' : ''}`}
+            onClick={() => onChangeSubgroup(2)}
+          >
+            2 подгруппа
+          </button>
+        </div>
       </div>
 
       <button className="list-card" onClick={onToggle}>

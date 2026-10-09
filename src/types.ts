@@ -14,6 +14,7 @@ export interface Lesson {
   room?: string;
   note?: string;
   lessonTypeAbbrev?: string;
+  subgroup?: number;
   registration: RegistrationStatus;
 }
 export interface QueueMember {
@@ -36,4 +37,4 @@ export interface Queue {
   joinedAt: string;
   members: QueueMember[];
 }
-export interface User { name: string; group: string; notifications: boolean }
+export interface User { name: string; group: string; notifications: boolean; subgroup?: 1 | 2 }

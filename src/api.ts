@@ -43,7 +43,12 @@ export const api = {
   getStoredUser(): User | null {
     try {
       const saved = localStorage.getItem(STORAGE_USER_KEY)
-      return saved ? JSON.parse(saved) : null
+      if (!saved) return null
+      const parsed = JSON.parse(saved)
+      if (parsed && typeof parsed === 'object') {
+        parsed.subgroup = Number(parsed.subgroup) === 2 ? 2 : 1
+      }
+      return parsed
     } catch {
       return null
     }
@@ -51,27 +56,39 @@ export const api = {
 
   saveStoredUser(user: User) {
     try {
-      localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user))
+      const normalized: User = {
+        ...user,
+        subgroup: Number(user.subgroup) === 2 ? 2 : 1
+      }
+      localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(normalized))
     } catch {
       // ignore
     }
   },
 
-  async login(group: string, password?: string, name?: string): Promise<User> {
+  async login(group: string, password?: string, name?: string, subgroup?: 1 | 2): Promise<User> {
     const cleanGroup = group.trim() || '668204'
     const cleanName = (name || '').trim()
+    const existing = this.getStoredUser()
+    const cleanSubgroup: 1 | 2 = subgroup || existing?.subgroup || 1
 
     try {
       const data = await remote<{ user: User; token: string }>('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ group: cleanGroup, password: password || 'hedge67', name: cleanName })
+        body: JSON.stringify({
+          group: cleanGroup,
+          password: password || 'hedge67',
+          name: cleanName,
+          subgroup: cleanSubgroup
+        })
       })
       if (data.token) {
         localStorage.setItem('labflow_token', data.token)
         const userObj: User = {
           name: cleanName || data.user.name || '',
           group: cleanGroup,
-          notifications: true
+          notifications: true,
+          subgroup: Number(data.user?.subgroup) === 2 ? 2 : cleanSubgroup
         }
         this.saveStoredUser(userObj)
         return userObj
@@ -83,7 +100,8 @@ export const api = {
     const localUser: User = {
       name: cleanName,
       group: cleanGroup,
-      notifications: true
+      notifications: true,
+      subgroup: cleanSubgroup
     }
     localStorage.setItem('labflow_token', 'local-token-' + Date.now())
     this.saveStoredUser(localUser)
@@ -360,6 +378,18 @@ export const api = {
       await remote('/me', {
         method: 'PATCH',
         body: JSON.stringify({ notifications: updated.notifications })
+      })
+    } catch {}
+    return updated
+  },
+
+  async setSubgroup(user: User, subgroup: 1 | 2): Promise<User> {
+    const updated: User = { ...user, subgroup }
+    this.saveStoredUser(updated)
+    try {
+      await remote('/me', {
+        method: 'PATCH',
+        body: JSON.stringify({ subgroup })
       })
     } catch {}
     return updated
