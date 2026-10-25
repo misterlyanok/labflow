@@ -27,9 +27,16 @@ export const toStandardDate = (value: unknown): string => {
   return d ? formatYMD(d) : ''
 }
 
+// Текущее время по Минску независимо от часового пояса устройства:
+// расписание и границы пар привязаны к Europe/Minsk.
+export const getMinskDate = (): Date => {
+  const now = new Date()
+  return new Date(now.getTime() + (now.getTimezoneOffset() + 180) * 60000)
+}
+
 export function isLessonEnded(lesson: Lesson | null | undefined): boolean {
   if (!lesson || !lesson.date) return false
-  const now = new Date()
+  const now = getMinskDate()
   const todayYMD = formatYMD(now)
 
   if (lesson.date < todayYMD) return true
@@ -64,6 +71,12 @@ export function isLessonForSubgroup(lesson: Lesson, userSubgroup?: 1 | 2): boole
   if (!userSubgroup) return true
   if (!lesson.subgroup || lesson.subgroup === 0) return true
   return lesson.subgroup === userSubgroup
+}
+
+// Лабораторная — это и «ЛР» из ИИС, и «Лаб» из старого формата.
+export function isLabLesson(lesson: Pick<Lesson, 'lessonTypeAbbrev'>): boolean {
+  const abbrev = (lesson.lessonTypeAbbrev || '').trim().toUpperCase()
+  return abbrev === 'ЛР' || abbrev === 'ЛАБ'
 }
 
 export function getWeekNumber(

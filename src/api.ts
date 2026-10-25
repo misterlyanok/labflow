@@ -1,13 +1,41 @@
-import type { Lesson, Queue, QueueMember, Subject, User } from './types'
-import { fetchDirectBsuirSchedule } from './scheduleParser'
+import type { Lesson, Queue, QueueView, Subject, User } from './types'
+import { fetchDirectBsuirSchedule, isLabLesson } from './scheduleParser'
 
 const rawEnvUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 const remoteBase = rawEnvUrl.includes('your-labflow-api') ? '' : rawEnvUrl
-export const usingRemoteApi = true
 
 const remoteToken = () => localStorage.getItem('labflow_token') || ''
 
-async function remote<T>(path: string, options: RequestInit = {}): Promise<T> {
+// Тихий перелогин по сохранённым группе+имени: сессии в памяти сервера живут
+// до его перезапуска, а токен в localStorage — дольше. На 401 восстанавливаем
+// сессию автоматически, upsert на бэкенде вернёт того же пользователя.
+async function silentRelogin(): Promise<boolean> {
+  const stored = api.getStoredUser()
+  if (!stored?.name) return false
+  try {
+    const response = await fetch(`${remoteBase}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        group: stored.group || '668204',
+        name: stored.name,
+        subgroup: stored.subgroup || 1
+      })
+    })
+    if (!response.ok) return false
+    const data = await response.json().catch(() => null)
+    if (!data?.token) return false
+    localStorage.setItem('labflow_token', data.token)
+    if (data.user?.id) {
+      api.saveStoredUser({ ...stored, id: data.user.id })
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function remote<T>(path: string, options: RequestInit = {}, retried = false): Promise<T> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 6000)
 
@@ -24,6 +52,11 @@ async function remote<T>(path: string, options: RequestInit = {}): Promise<T> {
     clearTimeout(timeoutId)
     const data = await response.json().catch(() => ({}))
     if (!response.ok) {
+      if (data.code === 'UNAUTHORIZED' && !retried && path !== '/auth/login') {
+        if (await silentRelogin()) {
+          return await remote<T>(path, options, true)
+        }
+      }
       throw new Error(data.message || data.code || 'API_ERROR')
     }
     return data as T
@@ -33,10 +66,21 @@ async function remote<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 }
 
-const STORAGE_USER_KEY = 'labflow_current_user'
-const STORAGE_QUEUE_PREFIX = 'labflow_queue_members_'
+// Живой ли сервер очередей и есть ли под ним база. В деве API поднят
+// мидлварью Vite на том же origin, на Pages — только если задан VITE_API_URL.
+// db: false — сервер жив, но очередь держит в памяти и при рестарте обнулится.
+export async function checkBackendHealth(): Promise<{ online: boolean; db: boolean }> {
+  try {
+    const data = await remote<{ ok: boolean; db?: boolean }>('/health')
+    return { online: true, db: Boolean(data.db) }
+  } catch {
+    return { online: false, db: false }
+  }
+}
 
-// Cache loaded lessons in memory & session
+const STORAGE_USER_KEY = 'labflow_current_user'
+
+// Cache loaded lessons in memory
 let cachedLessons: Lesson[] = []
 
 export const api = {
@@ -66,9 +110,9 @@ export const api = {
     }
   },
 
-  async login(group: string, password?: string, name?: string, subgroup?: 1 | 2): Promise<User> {
+  async login(group: string, name?: string, subgroup?: 1 | 2): Promise<User> {
     const cleanGroup = group.trim() || '668204'
-    const cleanName = (name || '').trim()
+    const cleanName = (name || '').trim() || 'Студент'
     const existing = this.getStoredUser()
     const cleanSubgroup: 1 | 2 = subgroup || existing?.subgroup || 1
 
@@ -77,7 +121,6 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({
           group: cleanGroup,
-          password: password || 'hedge67',
           name: cleanName,
           subgroup: cleanSubgroup
         })
@@ -85,6 +128,7 @@ export const api = {
       if (data.token) {
         localStorage.setItem('labflow_token', data.token)
         const userObj: User = {
+          id: data.user?.id,
           name: cleanName || data.user.name || '',
           group: cleanGroup,
           notifications: true,
@@ -183,7 +227,7 @@ export const api = {
 
     for (const l of cachedLessons) {
       const sId = l.subjectId || l.subject?.toLowerCase() || 'other'
-      counts.set(sId, (counts.get(sId) || 0) + (l.lessonTypeAbbrev === 'ЛР' ? 1 : 0))
+      if (isLabLesson(l)) counts.set(sId, (counts.get(sId) || 0) + 1)
       if (!names.has(sId)) {
         names.set(sId, l.title && l.title !== l.subject ? `${l.subject} (${l.title})` : l.subject || sId)
       }
@@ -224,143 +268,57 @@ export const api = {
     return null
   },
 
-  async getQueueMembers(lessonId: string): Promise<QueueMember[]> {
+  async getQueueMembers(lessonId: string): Promise<QueueView> {
     try {
-      const data = await remote<{ members: QueueMember[] }>(`/lessons/${lessonId}/queue/members`)
-      if (data.members && Array.isArray(data.members)) {
-        localStorage.setItem(STORAGE_QUEUE_PREFIX + lessonId, JSON.stringify(data.members))
-        return data.members
+      const data = await remote<QueueView>(`/lessons/${lessonId}/queue/members`)
+      return {
+        members: Array.isArray(data.members) ? data.members : [],
+        completed: Array.isArray(data.completed) ? data.completed : [],
+        currentLabNo: data.currentLabNo ?? null
       }
     } catch (err) {
-      console.warn('Remote queue members fetch failed, checking local storage:', err)
-    }
-
-    try {
-      const local = localStorage.getItem(STORAGE_QUEUE_PREFIX + lessonId)
-      return local ? JSON.parse(local) : []
-    } catch {
-      return []
+      console.warn('Remote queue members fetch failed:', err)
+      return { members: [], completed: [], currentLabNo: null }
     }
   },
 
-  async getQueue(user?: User | null, lessonId = ''): Promise<Queue | null> {
-    const currentUser = user || this.getStoredUser()
-    if (!currentUser || !currentUser.name) return null
-
-    let members: QueueMember[] = []
-    if (lessonId) {
-      members = await this.getQueueMembers(lessonId)
-    }
-
+  async getQueue(): Promise<Queue | null> {
     try {
       const data = await remote<{ queue: Queue | null }>('/me/queue')
-      if (data.queue) {
-        if (!lessonId) {
-          members = await this.getQueueMembers(data.queue.lessonId)
-        }
-        data.queue.members = members
-        return data.queue
+      if (!data.queue) return null
+      if (!data.queue.members) {
+        const view = await this.getQueueMembers(data.queue.lessonId)
+        data.queue.members = view.members
+        data.queue.completed = view.completed
+        data.queue.currentLabNo = view.currentLabNo
       }
-    } catch {}
-
-    // Fallback: check local members
-    const myIndex = members.findIndex(
-      m => m.name.toLowerCase() === currentUser.name.toLowerCase() && m.status !== 'completed'
-    )
-    if (myIndex === -1) return null
-
-    const member = members[myIndex]
-    return {
-      id: member.id,
-      lessonId: lessonId || 'oaip',
-      number: member.number,
-      peopleAhead: myIndex,
-      estimatedWaitMinutes: myIndex * 5,
-      status: member.status,
-      joinedAt: member.joinedAt,
-      members
+      return data.queue
+    } catch (err) {
+      console.warn('Remote getQueue failed:', err)
+      return null
     }
   },
 
-  async joinQueue(lessonId: string, user: User): Promise<Queue> {
-    try {
-      const data = await remote<{ queue: Queue }>(`/lessons/${lessonId}/queue/join`, {
-        method: 'POST'
-      })
-      if (data.queue) {
-        const members = await this.getQueueMembers(lessonId)
-        data.queue.members = members
-        return data.queue
-      }
-    } catch (err) {
-      console.warn('Remote joinQueue failed, fallback to local queue:', err)
-    }
-
-    // Local fallback
-    const members = await this.getQueueMembers(lessonId)
-    const existing = members.find(m => m.name.toLowerCase() === user.name.toLowerCase())
-    if (!existing) {
-      const newMember: QueueMember = {
-        id: 'member-' + Date.now(),
-        number: members.length + 1,
-        name: user.name || 'Студент',
-        group: user.group || '668204',
-        status: members.length === 0 ? 'serving' : members.length === 1 ? 'next' : 'waiting',
-        joinedAt: new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date()),
-        isCurrentUser: true
-      }
-      members.push(newMember)
-      localStorage.setItem(STORAGE_QUEUE_PREFIX + lessonId, JSON.stringify(members))
-    }
-
-    const myIndex = members.findIndex(m => m.name.toLowerCase() === user.name.toLowerCase())
-    const num = myIndex >= 0 ? members[myIndex].number : 1
-
-    return {
-      id: 'queue-' + Date.now(),
-      lessonId,
-      number: num,
-      peopleAhead: Math.max(0, myIndex),
-      estimatedWaitMinutes: Math.max(0, myIndex) * 5,
-      status: myIndex === 0 ? 'serving' : myIndex === 1 ? 'next' : 'waiting',
-      joinedAt: new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date()),
-      members
-    }
+  async joinQueue(lessonId: string, labNo: number): Promise<Queue> {
+    // Намеренно без локального фолбэка: выдуманный номер в localStorage
+    // видел только сам пользователь, а сервер — нет.
+    const data = await remote<{ queue: Queue }>(`/lessons/${lessonId}/queue/join`, {
+      method: 'POST',
+      body: JSON.stringify({ labNo })
+    })
+    const view = await this.getQueueMembers(lessonId)
+    data.queue.members = view.members
+    data.queue.completed = view.completed
+    data.queue.currentLabNo = view.currentLabNo
+    return data.queue
   },
 
-  async leaveQueue(user: User, queueId?: string, lessonId?: string): Promise<void> {
-    try {
-      await remote('/me/queue', { method: 'DELETE' })
-    } catch (err) {
-      console.warn('DELETE /me/queue failed, trying alternative routes:', err)
-      if (queueId) {
-        try {
-          await remote(`/queues/${queueId}/leave`, { method: 'DELETE' })
-        } catch {}
-      }
-      if (lessonId) {
-        try {
-          await remote(`/lessons/${lessonId}/queue/leave`, { method: 'POST' })
-        } catch {}
-      }
-    }
-
-    if (lessonId) {
-      const members = (await this.getQueueMembers(lessonId)).filter(
-        m => m.name.toLowerCase() !== user.name.toLowerCase()
-      )
-      const renumbered = members.map((m, idx) => ({ ...m, number: idx + 1 }))
-      localStorage.setItem(STORAGE_QUEUE_PREFIX + lessonId, JSON.stringify(renumbered))
-    }
+  async leaveQueue(): Promise<void> {
+    await remote('/me/queue', { method: 'DELETE' })
   },
 
-  async resetQueue(lessonId: string): Promise<void> {
-    try {
-      await remote(`/lessons/${lessonId}/queue/reset`, { method: 'POST' })
-    } catch (err) {
-      console.warn('Remote resetQueue failed:', err)
-    }
-    localStorage.removeItem(STORAGE_QUEUE_PREFIX + lessonId)
+  async completeQueue(): Promise<void> {
+    await remote('/me/queue/complete', { method: 'POST' })
   },
 
   async history(): Promise<unknown[]> {

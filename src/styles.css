@@ -484,5 +484,87 @@
   box-shadow: 0 4px 14px #21bde833 !important;
 }
 
+/* Lab picker: выбор защищаемой лабораторной при входе в очередь */
+.lab-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.lab-picker-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 8px 12px !important;
+  border-radius: 12px !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  background: #071936 !important;
+  color: #8eb4d8 !important;
+  border: 1px solid #355e8866 !important;
+  box-shadow: none !important;
+}
+
+.lab-picker-btn.is-plan {
+  border-color: #5ee0ff88;
+}
+
+.lab-picker-btn small {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #5ee0ff;
+}
+
+.lab-picker-btn.active {
+  background: linear-gradient(135deg, #60e0ff, #20b8e7) !important;
+  color: #03142f !important;
+  box-shadow: 0 4px 14px #21bde833 !important;
+}
+
+.lab-picker-btn.active small {
+  color: #062a3d;
+}
+
+/* Приоритет очереди: долг / текущая / впереди программы */
+.queue-member-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.lab-badge {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.lab-badge.p1 {
+  background: #5c2a2a;
+  color: #ffb3a0;
+  border: 1px solid #ff8a6544;
+}
+
+.lab-badge.p2 {
+  background: #14597b;
+  color: #7ee8ff;
+  border: 1px solid #7ee8ff66;
+}
+
+.lab-badge.p3 {
+  background: #233a15;
+  color: #c2f08a;
+  border: 1px solid #a3e63544;
+}
+
 
 

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { api, usingRemoteApi } from './api'
-import { isLessonEnded, isLessonForSubgroup } from './scheduleParser'
-import type { Lesson, Queue, QueueMember, Screen, User } from './types'
+import { api, checkBackendHealth } from './api'
+import { formatYMD, getMinskDate, isLabLesson, isLessonEnded, isLessonForSubgroup } from './scheduleParser'
+import type { Lesson, Queue, QueueMember, QueueView, Screen, User } from './types'
 import './styles.css'
 
 const statusCopy: Record<string, string> = {
@@ -13,10 +13,11 @@ const statusCopy: Record<string, string> = {
   completed: 'Сдал работу'
 }
 
+const priorityCopy: Record<number, string> = { 1: 'Долг', 2: 'Текущая', 3: 'Впереди' }
+
 export function getPrimaryOaipLesson(schedule: Lesson[], userSubgroup?: 1 | 2): Lesson | null {
   if (!schedule || !schedule.length) return null
-  const now = new Date()
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const todayStr = formatYMD(getMinskDate())
 
   const filtered = userSubgroup ? schedule.filter(l => isLessonForSubgroup(l, userSubgroup)) : schedule
   const pool = filtered.length > 0 ? filtered : schedule
@@ -25,7 +26,7 @@ export function getPrimaryOaipLesson(schedule: Lesson[], userSubgroup?: 1 | 2): 
   const upcomingLab = pool.find(
     l =>
       (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
-      (l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб') &&
+      isLabLesson(l) &&
       l.date >= todayStr
   )
   if (upcomingLab) return upcomingLab
@@ -42,7 +43,7 @@ export function getPrimaryOaipLesson(schedule: Lesson[], userSubgroup?: 1 | 2): 
   const anyLab = pool.find(
     l =>
       (l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')) &&
-      (l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб')
+      isLabLesson(l)
   )
   if (anyLab) return anyLab
 
@@ -61,23 +62,28 @@ function App() {
   const [lesson, setLesson] = useState<Lesson | null>(null)
   const [queue, setQueue] = useState<Queue | null>(null)
   const [queueMembers, setQueueMembers] = useState<QueueMember[]>([])
+  const [completedMembers, setCompletedMembers] = useState<QueueMember[]>([])
+  const [currentLabNo, setCurrentLabNo] = useState<number | null>(null)
   const [lessons, setLessons] = useState<Lesson[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [scheduleStatus, setScheduleStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [backendHealth, setBackendHealth] = useState<{ online: boolean; db: boolean } | null>(null)
 
   // Form states: prefilled with student's real group and defaults
   const [loginGroup, setLoginGroup] = useState(user?.group || '668204')
   const [loginName, setLoginName] = useState(user?.name || '')
-  const [loginPassword, setLoginPassword] = useState('hedge67')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const loadAppData = async (currentUser: User) => {
     if (!currentUser) return
     setLoading(true)
+    setScheduleStatus('loading')
     setError('')
     try {
       const schedule = await api.getUniversitySchedule(currentUser.group)
       setLessons(schedule)
+      setScheduleStatus(schedule.length > 0 ? 'ready' : 'error')
 
       const targetOaip = getPrimaryOaipLesson(schedule, currentUser.subgroup || 1)
 
@@ -85,18 +91,19 @@ function App() {
         setLesson(targetOaip)
         if (isLessonEnded(targetOaip)) {
           setQueue(null)
-          setQueueMembers([])
+          applyQueueView({ members: [], completed: [], currentLabNo: null })
         } else {
-          const [activeQueue, members] = await Promise.all([
-            api.getQueue(currentUser, targetOaip.id),
+          const [activeQueue, view] = await Promise.all([
+            api.getQueue(),
             api.getQueueMembers(targetOaip.id)
           ])
           setQueue(activeQueue)
-          setQueueMembers(members)
+          applyQueueView(view)
         }
       }
     } catch (err: any) {
       console.warn('Failed to load schedule:', err)
+      setScheduleStatus('error')
       setError('Не удалось загрузить расписание. Проверьте соединение.')
     } finally {
       setLoading(false)
@@ -109,27 +116,60 @@ function App() {
     }
   }, [user?.group, user?.name])
 
-  // Periodic polling for queue sync across different devices/browsers
+  // Health check + повторная проверка, когда вкладка снова видна
+  useEffect(() => {
+    if (!user?.name) return
+    let cancelled = false
+    const check = () => {
+      checkBackendHealth().then(health => {
+        if (!cancelled) setBackendHealth(health)
+      })
+    }
+    check()
+    document.addEventListener('visibilitychange', check)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', check)
+    }
+  }, [user?.name])
+
+  const applyQueueView = (view: QueueView) => {
+    setQueueMembers(view.members)
+    setCompletedMembers(view.completed)
+    setCurrentLabNo(view.currentLabNo)
+  }
+
+  const syncQueueState = async (currentUser: User, currentLesson: Lesson) => {
+    if (isLessonEnded(currentLesson)) {
+      setQueue(null)
+      applyQueueView({ members: [], completed: [], currentLabNo: null })
+      return
+    }
+    const [activeQueue, view] = await Promise.all([
+      api.getQueue(),
+      api.getQueueMembers(currentLesson.id)
+    ])
+    setQueue(activeQueue)
+    applyQueueView(view)
+  }
+
+  // Periodic polling for queue sync across different devices/browsers.
+  // В скрытой вкладке опросы ставятся на паузу, при возврате — мгновенная синхронизация.
   useEffect(() => {
     if (!user || !user.name || !lesson) return
-    const interval = setInterval(async () => {
-      try {
-        if (isLessonEnded(lesson)) {
-          setQueue(null)
-          setQueueMembers([])
-          return
-        }
-        const [activeQueue, members] = await Promise.all([
-          api.getQueue(user, lesson.id),
-          api.getQueueMembers(lesson.id)
-        ])
-        setQueue(activeQueue)
-        setQueueMembers(members)
-      } catch (e) {
-        // silent background sync
-      }
-    }, 4000)
-    return () => clearInterval(interval)
+    const tick = () => {
+      if (document.visibilityState === 'hidden') return
+      syncQueueState(user, lesson).catch(() => {})
+    }
+    const interval = setInterval(tick, 4000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tick()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [user?.name, lesson?.id])
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -142,7 +182,7 @@ function App() {
     const cleanName = loginName.trim() || 'Студент'
 
     try {
-      const u = await api.login(cleanGroup, loginPassword, cleanName)
+      const u = await api.login(cleanGroup, cleanName)
       setUser(u)
       await loadAppData(u)
     } catch (err: any) {
@@ -158,10 +198,12 @@ function App() {
     setQueue(null)
     setQueueMembers([])
     setLessons([])
+    setScheduleStatus('loading')
+    setBackendHealth(null)
     setScreen('home')
   }
 
-  // Unified single-screen login: group, name, and password
+  // Unified single-screen login: group and name
   if (!user || !user.name) {
     return (
       <main className="auth">
@@ -191,16 +233,6 @@ function App() {
               required
             />
           </label>
-          <label>
-            Пароль
-            <input
-              type="password"
-              value={loginPassword}
-              onChange={e => setLoginPassword(e.target.value)}
-              placeholder="Введите пароль"
-              required
-            />
-          </label>
 
           <button type="submit" disabled={isSubmitting}>
             {isSubmitting ? 'Вход...' : 'Войти в LabFlow'}
@@ -217,12 +249,12 @@ function App() {
     try {
       const full = (await api.getLesson(l.id)) || l
       setLesson(full)
-      const [q, members] = await Promise.all([
-        api.getQueue(user, full.id),
+      const [q, view] = await Promise.all([
+        api.getQueue(),
         api.getQueueMembers(full.id)
       ])
       setQueue(q)
-      setQueueMembers(members)
+      applyQueueView(view)
       setScreen('lesson')
     } finally {
       setLoading(false)
@@ -237,14 +269,14 @@ function App() {
       setLesson(currentLesson)
       if (isLessonEnded(currentLesson)) {
         setQueue(null)
-        setQueueMembers([])
+        applyQueueView({ members: [], completed: [], currentLabNo: null })
       } else {
-        const [q, members] = await Promise.all([
-          api.getQueue(user, currentLesson.id),
+        const [q, view] = await Promise.all([
+          api.getQueue(),
           api.getQueueMembers(currentLesson.id)
         ])
         setQueue(q)
-        setQueueMembers(members)
+        applyQueueView(view)
       }
       setScreen('queue')
     } finally {
@@ -252,7 +284,7 @@ function App() {
     }
   }
 
-  const joinQueue = async () => {
+  const joinQueue = async (labNo: number) => {
     if (!user) return
     const currentLesson = lesson || lessons[0]
     if (!currentLesson) return
@@ -263,10 +295,9 @@ function App() {
     setLoading(true)
     setError('')
     try {
-      const q = await api.joinQueue(currentLesson.id, user)
-      const members = await api.getQueueMembers(currentLesson.id)
+      const q = await api.joinQueue(currentLesson.id, labNo)
       setQueue(q)
-      setQueueMembers(members)
+      applyQueueView({ members: q.members, completed: q.completed || [], currentLabNo: q.currentLabNo ?? null })
       setScreen('queue')
     } catch (err: any) {
       setError(err?.message || 'Не удалось встать в очередь')
@@ -276,15 +307,12 @@ function App() {
   }
 
   const leaveQueue = async () => {
-    if (!user) return
     setLoading(true)
     setError('')
     try {
-      const currentLessonId = lesson?.id || ''
-      await api.leaveQueue(user, queue?.id, currentLessonId)
+      await api.leaveQueue()
       setQueue(null)
-      const members = await api.getQueueMembers(currentLessonId)
-      setQueueMembers(members)
+      applyQueueView(await api.getQueueMembers(lesson?.id || ''))
     } catch (err: any) {
       setError(err?.message || 'Не удалось покинуть очередь')
     } finally {
@@ -292,16 +320,15 @@ function App() {
     }
   }
 
-  const resetQueue = async () => {
-    if (!lesson) return
+  const completeQueue = async () => {
     setLoading(true)
     setError('')
     try {
-      await api.resetQueue(lesson.id)
+      await api.completeQueue()
       setQueue(null)
-      setQueueMembers([])
+      applyQueueView(await api.getQueueMembers(lesson?.id || ''))
     } catch (err: any) {
-      setError(err?.message || 'Не удалось сбросить очередь')
+      setError(err?.message || 'Не удалось отметить защиту')
     } finally {
       setLoading(false)
     }
@@ -316,15 +343,15 @@ function App() {
       setLesson(targetOaip)
       if (isLessonEnded(targetOaip)) {
         setQueue(null)
-        setQueueMembers([])
+        applyQueueView({ members: [], completed: [], currentLabNo: null })
       } else {
         try {
-          const [activeQueue, members] = await Promise.all([
-            api.getQueue(updated, targetOaip.id),
+          const [activeQueue, view] = await Promise.all([
+            api.getQueue(),
             api.getQueueMembers(targetOaip.id)
           ])
           setQueue(activeQueue)
-          setQueueMembers(members)
+          applyQueueView(view)
         } catch {}
       }
     }
@@ -348,6 +375,24 @@ function App() {
       </header>
 
       <div className="content">
+        {backendHealth && !backendHealth.online && (
+          <div className="banner" style={{ background: '#4d3d20', border: '1px solid #ffe28a66', color: '#ffe8b0', padding: '12px 16px', borderRadius: 16, marginBottom: 12 }}>
+            <b style={{ color: '#fff' }}>⚠️ Сервер очередей недоступен</b>
+            <p style={{ margin: '4px 0 0', fontSize: 13 }}>
+              Расписание загружается напрямую из ИИС, но вход в очередь и синхронизация не работают. Проверьте соединение или попробуйте позже.
+            </p>
+          </div>
+        )}
+
+        {backendHealth?.online && !backendHealth.db && (
+          <div className="banner" style={{ background: '#3d3520', border: '1px solid #ffcf7a55', color: '#ffe3a8', padding: '12px 16px', borderRadius: 16, marginBottom: 12 }}>
+            <b style={{ color: '#fff' }}>База данных недоступна</b>
+            <p style={{ margin: '4px 0 0', fontSize: 13 }}>
+              Очередь работает, пока сервер не уснёт или не перезапустится — тогда она обнулится. На время пары этого достаточно.
+            </p>
+          </div>
+        )}
+
         {error && (
           <div className="error banner">
             {error}
@@ -364,6 +409,8 @@ function App() {
                 user={user}
                 queue={queue}
                 lessons={lessons}
+                scheduleStatus={scheduleStatus}
+                onRetry={() => loadAppData(user)}
                 onOpenQueue={() => {
                   const target = getPrimaryOaipLesson(lessons, user.subgroup || 1) || lesson
                   if (target) openQueue(target)
@@ -386,7 +433,6 @@ function App() {
                 lesson={lesson}
                 queue={queue}
                 members={queueMembers}
-                onJoin={joinQueue}
                 onQueue={() => openQueue(lesson)}
               />
             )}
@@ -397,17 +443,19 @@ function App() {
                 lesson={lesson || lessons[0]}
                 user={user}
                 members={queueMembers}
+                completed={completedMembers}
+                currentLabNo={currentLabNo}
                 onJoin={joinQueue}
                 onLeave={leaveQueue}
-                onReset={resetQueue}
+                onComplete={completeQueue}
                 onRefresh={async () => {
                   if (!lesson) return
-                  const [q, mems] = await Promise.all([
-                    api.getQueue(user, lesson.id),
+                  const [q, view] = await Promise.all([
+                    api.getQueue(),
                     api.getQueueMembers(lesson.id)
                   ])
                   setQueue(q)
-                  setQueueMembers(mems)
+                  applyQueueView(view)
                 }}
               />
             )}
@@ -467,12 +515,16 @@ function Home({
   user,
   queue,
   lessons,
+  scheduleStatus,
+  onRetry,
   onOpenQueue,
   onOpenLesson
 }: {
   user: User
   queue: Queue | null
   lessons: Lesson[]
+  scheduleStatus: 'loading' | 'ready' | 'error'
+  onRetry: () => void
   onOpenQueue: () => void
   onOpenLesson: (l: Lesson) => void
 }) {
@@ -492,11 +544,10 @@ function Home({
         <button className="queue-card" onClick={onOpenQueue}>
           <div>
             <p className="eyebrow">ВАШЕ МЕСТО В ОЧЕРЕДИ ПО ОАиП</p>
-            <strong>№{queue.number}</strong>
+            <strong>№{queue.position ?? '—'}</strong>
             <p>
-              {queue.peopleAhead === 0
-                ? 'Вы у преподавателя на защите'
-                : `${queue.peopleAhead} чел. перед вами · ~${queue.estimatedWaitMinutes} мин`}
+              {queue.labNo ? `Лаба №${queue.labNo}${queue.priorityClass ? ` · ${priorityCopy[queue.priorityClass]}` : ''} · ` : ''}
+              {queue.peopleAhead === 0 ? 'вы защищаете первым' : `${queue.peopleAhead} чел. перед вами · ~${queue.estimatedWaitMinutes} мин`}
             </p>
           </div>
           <span>Открыть очередь →</span>
@@ -535,8 +586,20 @@ function Home({
             <b>{oaipLesson.startTime}</b>
           </time>
         </button>
-      ) : (
+      ) : scheduleStatus === 'loading' ? (
         <div className="hint">Загрузка расписания из университетского сервиса...</div>
+      ) : (
+        <div className="hint" style={{ textAlign: 'center', padding: '24px 16px' }}>
+          <p style={{ fontWeight: 700, fontSize: 16, color: '#f1f8ff', margin: '0 0 6px' }}>
+            Расписание не загрузилось
+          </p>
+          <p style={{ margin: '0 0 12px', fontSize: 13, color: '#92b5d6' }}>
+            Проверьте номер группы и подключение к интернету.
+          </p>
+          <button className="secondary" style={{ padding: '10px 18px' }} onClick={onRetry}>
+            ↻ Повторить загрузку
+          </button>
+        </div>
       )}
     </>
   )
@@ -547,28 +610,36 @@ function QueueView({
   lesson,
   user,
   members,
+  completed,
+  currentLabNo,
   onJoin,
   onLeave,
-  onReset,
+  onComplete,
   onRefresh
 }: {
   queue: Queue | null
   lesson: Lesson | null
   user: User
   members: QueueMember[]
-  onJoin: () => void
+  completed: QueueMember[]
+  currentLabNo: number | null
+  onJoin: (labNo: number) => void
   onLeave: () => void
-  onReset?: () => void
+  onComplete: () => void
   onRefresh?: () => void
 }) {
   const [refreshing, setRefreshing] = useState(false)
   const [confirmLeave, setConfirmLeave] = useState(false)
-  const [confirmReset, setConfirmReset] = useState(false)
+  const [confirmComplete, setConfirmComplete] = useState(false)
+  const [selectedLab, setSelectedLab] = useState<number | null>(null)
 
   const isEnded = isLessonEnded(lesson)
   const activeMembers = isEnded ? [] : members.filter(m => m.status !== 'completed')
-  const servingMember = isEnded ? null : members.find(m => m.status === 'serving')
+  // Голова очереди (место 1) — тот, кто сейчас на защите
+  const servingMember = isEnded ? null : activeMembers[0] || null
   const isUserInQueue = Boolean(queue && !isEnded)
+  const isUserServing = Boolean(isUserInQueue && queue && queue.position === 1)
+  const pickedLab = selectedLab ?? currentLabNo ?? 1
 
   const handleManualRefresh = async () => {
     if (!onRefresh || refreshing) return
@@ -586,12 +657,16 @@ function QueueView({
       <h1>{lesson?.title || 'Лабораторная работа по ОАиП'}</h1>
       <p className="muted">
         {[
+          currentLabNo ? `По плану: Лабораторная №${currentLabNo}` : '',
           lesson?.subgroup === 1 || lesson?.subgroup === 2 ? `${lesson.subgroup} подгруппа` : '',
           lesson?.teacher,
           lesson?.room ? `Ауд. ${lesson.room}` : '',
           lesson?.date,
           lesson?.startTime && lesson?.endTime ? `${lesson.startTime}–${lesson.endTime}` : lesson?.startTime
         ].filter(Boolean).join(' · ')}
+      </p>
+      <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+        Долги пропускаются вперёд, дальше текущая лаба, затем те, кто идёт впереди программы. Внутри группы — по времени записи.
       </p>
 
       {/* Lesson ended notification banner */}
@@ -617,17 +692,21 @@ function QueueView({
           <span>На защите</span>
         </div>
         <div>
-          <b>~{activeMembers.length * 5} мин</b>
+          <b>~{(queue ? queue.peopleAhead : activeMembers.length) * 5} мин</b>
           <span>Ожидание</span>
         </div>
       </div>
 
       {/* Current student card */}
       {isUserInQueue && queue ? (
-        <div className={'queue-main ' + queue.status}>
-          <p>{statusCopy[queue.status] || 'Вы в очереди'}</p>
-          <strong>№{queue.number}</strong>
+        <div className={'queue-main ' + (isUserServing ? 'serving' : queue.status)}>
+          <p>{isUserServing ? 'На защите — ваша очередь' : statusCopy[queue.status] || 'Вы в очереди'}</p>
+          <strong>№{queue.position ?? '—'}</strong>
           <div className="queue-stats">
+            <span>
+              <b>{queue.labNo ? `Лаба №${queue.labNo}` : '—'}</b>
+              {queue.priorityClass ? priorityCopy[queue.priorityClass].toLowerCase() : 'защита'}
+            </span>
             <span>
               <b>{queue.peopleAhead}</b>
               перед вами
@@ -637,24 +716,41 @@ function QueueView({
               ожидание
             </span>
           </div>
-          <div style={{ marginTop: 20 }}>
-            {confirmLeave ? (
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+          <div style={{ marginTop: 20, display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            {confirmComplete ? (
+              <>
                 <button
-                  style={{
-                    background: '#d63031',
-                    color: '#fff',
-                    padding: '10px 18px',
-                    borderRadius: 14,
-                    fontSize: 13,
-                    fontWeight: 800
+                  style={{ background: '#2ed573', color: '#04231a', padding: '10px 18px', borderRadius: 14, fontSize: 13, fontWeight: 800 }}
+                  onClick={async () => {
+                    setConfirmComplete(false)
+                    await onComplete()
                   }}
+                >
+                  ✓ Да, я защитил
+                </button>
+                <button
+                  className="secondary"
+                  style={{ padding: '10px 18px', borderRadius: 14, fontSize: 13 }}
+                  onClick={() => setConfirmComplete(false)}
+                >
+                  Отмена
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setConfirmComplete(true)} style={{ padding: '10px 18px', borderRadius: 14, fontSize: 13 }}>
+                Я защитил
+              </button>
+            )}
+            {confirmLeave ? (
+              <>
+                <button
+                  style={{ background: '#d63031', color: '#fff', padding: '10px 18px', borderRadius: 14, fontSize: 13, fontWeight: 800 }}
                   onClick={async () => {
                     setConfirmLeave(false)
                     await onLeave()
                   }}
                 >
-                  Да, выйти из очереди
+                  Да, выйти
                 </button>
                 <button
                   className="secondary"
@@ -663,7 +759,7 @@ function QueueView({
                 >
                   Отмена
                 </button>
-              </div>
+              </>
             ) : (
               <button className="secondary" onClick={() => setConfirmLeave(true)}>
                 Покинуть очередь
@@ -681,15 +777,27 @@ function QueueView({
           </p>
         </div>
       ) : (
-        <div className="detail-card" style={{ textAlign: 'center', padding: '20px 16px' }}>
+        <div className="detail-card" style={{ padding: '20px 16px', textAlign: 'center' }}>
           <p style={{ border: 0, justifyContent: 'center', fontSize: 16, color: '#f1f8ff', fontWeight: 700 }}>
             Вы пока не в очереди
           </p>
-          <p style={{ border: 0, justifyContent: 'center', marginTop: -8 }}>
-            Нажмите кнопку ниже, чтобы занять очередь со своим именем ({user.name}).
+          <p style={{ border: 0, justifyContent: 'center', marginTop: -8, marginBottom: 6 }}>
+            Какую лабораторную защищаете? Долги попадают в начало очереди.
           </p>
-          <button onClick={onJoin} style={{ width: '100%', marginTop: 8 }}>
-            Встать в очередь по ОАиП
+          <div className="lab-picker">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(no => (
+              <button
+                key={no}
+                className={`lab-picker-btn ${pickedLab === no ? 'active' : ''} ${currentLabNo === no ? 'is-plan' : ''}`}
+                onClick={() => setSelectedLab(no)}
+              >
+                №{no}
+                {currentLabNo === no && <small>по плану</small>}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => onJoin(pickedLab)} style={{ width: '100%', marginTop: 10 }}>
+            Встать в очередь · Лаба №{pickedLab}
           </button>
         </div>
       )}
@@ -711,53 +819,17 @@ function QueueView({
               {refreshing ? 'Обновление...' : '↻ Обновить'}
             </button>
           )}
-          {onReset && (
-            confirmReset ? (
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button
-                  style={{
-                    background: '#d63031',
-                    color: '#fff',
-                    padding: '6px 10px',
-                    fontSize: 12,
-                    borderRadius: 10,
-                    fontWeight: 700
-                  }}
-                  onClick={async () => {
-                    setConfirmReset(false)
-                    await onReset()
-                  }}
-                >
-                  Сбросить
-                </button>
-                <button
-                  className="secondary"
-                  style={{ padding: '6px 8px', fontSize: 12, borderRadius: 10 }}
-                  onClick={() => setConfirmReset(false)}
-                >
-                  ×
-                </button>
-              </div>
-            ) : (
-              <button
-                className="secondary"
-                onClick={() => setConfirmReset(true)}
-                style={{ padding: '6px 10px', fontSize: 13, borderRadius: 10, color: '#ffafc0' }}
-                title="Сбросить очередь лабораторной"
-              >
-                Сброс
-              </button>
-            )
-          )}
         </div>
       </div>
 
       <div className="queue-members-list">
-        {!isEnded && members.map(member => {
+        {!isEnded && activeMembers.map(member => {
           const isCurrent =
             member.isCurrentUser ||
-            (user.name && member.name.toLowerCase() === user.name.toLowerCase())
-          const isServing = member.status === 'serving'
+            (user.id && member.userId
+              ? member.userId === user.id
+              : Boolean(user.name && member.name.toLowerCase() === user.name.toLowerCase()))
+          const isServing = member.position === 1
 
           return (
             <div
@@ -767,34 +839,44 @@ function QueueView({
               }`}
             >
               <div className="queue-member-left">
-                <div className="queue-pos-badge">№{member.number}</div>
+                <div className="queue-pos-badge">№{member.position ?? '—'}</div>
                 <div className="queue-member-info">
                   <div className="queue-member-name-row">
                     <span className="queue-member-name">{member.name}</span>
                     {isCurrent && <span className="you-pill">Вы</span>}
                   </div>
                   <span className="queue-member-meta">
-                    Группа: {member.group} · записан в {member.joinedAt}
+                    {member.labNo ? `Лаба №${member.labNo} · ` : ''}записан в {member.joinedAt}
                   </span>
                 </div>
               </div>
 
-              <div>
-                <span className={`queue-tag ${member.status}`}>
-                  {member.status === 'serving' && '🟢 На защите'}
-                  {member.status === 'next' && '🟡 Следующий'}
-                  {member.status === 'waiting' && '⏳ В очереди'}
-                  {member.status === 'called' && '🔔 Вызывают'}
-                  {member.status === 'completed' && '✓ Защитил'}
+              <div className="queue-member-side">
+                {member.priorityClass && (
+                  <span className={`lab-badge p${member.priorityClass}`}>{priorityCopy[member.priorityClass]}</span>
+                )}
+                <span className={`queue-tag ${isServing ? 'serving' : member.status}`}>
+                  {isServing && '🟢 На защите'}
+                  {!isServing && member.status === 'waiting' && '⏳ В очереди'}
+                  {!isServing && member.status === 'next' && '🟡 Следующий'}
+                  {!isServing && member.status === 'called' && '🔔 Вызывают'}
+                  {!isServing && member.status === 'completed' && '✓ Защитил'}
                 </span>
               </div>
             </div>
           )
         })}
 
-        {(isEnded || members.length === 0) && (
+        {(isEnded || activeMembers.length === 0) && (
           <div className="hint">
             {isEnded ? 'Очередь сброшена по окончании пары.' : 'Очередь пуста. Будьте первым, кто запишется!'}
+          </div>
+        )}
+
+        {!isEnded && completed.length > 0 && (
+          <div className="hint" style={{ textAlign: 'center' }}>
+            ✓ Сдали на этой паре:{' '}
+            {completed.map(m => `${m.name.split(' ')[0]}${m.labNo ? ` (№${m.labNo})` : ''}`).join(', ')}
           </div>
         )}
       </div>
@@ -806,20 +888,18 @@ function LessonDetails({
   lesson,
   queue,
   members,
-  onJoin,
   onQueue
 }: {
   lesson: Lesson
   queue: Queue | null
   members: QueueMember[]
-  onJoin: () => void
   onQueue: () => void
 }) {
   const activeCount = members.filter(m => m.status !== 'completed').length
 
   return (
     <>
-      <p className="eyebrow">{lesson.lessonTypeAbbrev === 'ЛР' ? 'ЛАБОРАТОРНАЯ РАБОТА' : 'ЗАНЯТИЕ'}</p>
+      <p className="eyebrow">{isLabLesson(lesson) ? 'ЛАБОРАТОРНАЯ РАБОТА' : 'ЗАНЯТИЕ'}</p>
       <h1>{lesson.title}</h1>
       <p className="muted">
         {lesson.date} · {lesson.startTime}–{lesson.endTime}
@@ -856,13 +936,9 @@ function LessonDetails({
       </div>
 
       <div style={{ display: 'grid', gap: 12 }}>
-        <button onClick={onQueue}>Открыть очередь ({activeCount} чел.)</button>
-
-        {!queue && (
-          <button className="secondary" onClick={onJoin}>
-            Встать в очередь
-          </button>
-        )}
+        <button onClick={onQueue}>
+          {queue ? 'Открыть мою очередь' : `Открыть очередь (${activeCount} чел.)`}
+        </button>
       </div>
     </>
   )
@@ -883,22 +959,22 @@ function ScheduleView({
   const [periodFilter, setPeriodFilter] = useState<'upcoming' | 'week' | 'all'>('upcoming')
   const [searchQuery, setSearchQuery] = useState('')
 
-  const now = new Date()
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const now = getMinskDate()
+  const todayStr = formatYMD(now)
 
   // Week boundaries (Monday to Sunday)
   const dayOfWeek = (now.getDay() + 6) % 7 // Monday = 0
   const monday = new Date(now)
   monday.setDate(monday.getDate() - dayOfWeek)
-  const mondayStr = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`
+  const mondayStr = formatYMD(monday)
 
   const sunday = new Date(monday)
   sunday.setDate(sunday.getDate() + 6)
-  const sundayStr = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`
+  const sundayStr = formatYMD(sunday)
 
   const tomorrow = new Date(now)
   tomorrow.setDate(tomorrow.getDate() + 1)
-  const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
+  const tomorrowStr = formatYMD(tomorrow)
 
   // 0. Filter by user's selected subgroup (shows common lessons + user's subgroup)
   const subgroupLessons = lessons.filter(l => isLessonForSubgroup(l, userSubgroup))
@@ -906,7 +982,7 @@ function ScheduleView({
   // 1. Filter by subject and search query
   let filtered = subgroupLessons.filter(l => {
     const isOaip = l.subject?.toLowerCase().includes('оаип') || l.title?.toLowerCase().includes('оаип')
-    const isLab = l.lessonTypeAbbrev === 'ЛР' || l.lessonTypeAbbrev === 'Лаб'
+    const isLab = isLabLesson(l)
     const isPz = l.lessonTypeAbbrev === 'ПЗ'
     const isLk = l.lessonTypeAbbrev === 'ЛК'
 
@@ -1259,13 +1335,13 @@ function History() {
     <>
       <p className="eyebrow">АРХИВ СДАЧ</p>
       <h1>История лабораторных</h1>
-      <div className="list">
-        <div className="history-item">
-          <b>ОАиП (Основы алгоритмизации и программирования)</b>
-          <p>Лабораторная работа</p>
-          <small>ОАиП · Сдано преподавателю</small>
-          <span className="tag completed">Сдано</span>
-        </div>
+      <div className="hint" style={{ textAlign: 'center', padding: '30px 20px' }}>
+        <p style={{ fontWeight: 700, fontSize: 16, color: '#f1f8ff', margin: '0 0 6px' }}>
+          Пока пусто
+        </p>
+        <p style={{ margin: 0, fontSize: 13, color: '#92b5d6' }}>
+          Здесь появится история защит, как только начнёте сдавать лабораторные через очередь.
+        </p>
       </div>
     </>
   )
